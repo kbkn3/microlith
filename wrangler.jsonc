@@ -1,0 +1,17 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "microlith",
+  // Deploy to Cloudflare のボタンはモノレポのサブディレクトリを正式サポートしない。
+  // ルートに置いて main だけ packages/core を指すことで、未文書な設定探索に依存せず済む。
+  "main": "packages/core/src/index.ts",
+  "compatibility_date": "2026-08-27",
+  "observability": { "enabled": true },
+  "durable_objects": {
+    "bindings": [{ "name": "VAULT", "class_name": "VaultDO" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["VaultDO"] }],
+  // ボタンはリソース名のデフォルト値を必要とする。provision 後に Cloudflare が書き換える。
+  "r2_buckets": [{ "binding": "ASSETS", "bucket_name": "microlith-assets" }],
+  // 素の HTML で配信し build ステップを不要にしている。ビルド設定が空欄のままボタンが通る。
+  "assets": { "directory": "./packages/core/public", "binding": "SETUP_UI" }
+}

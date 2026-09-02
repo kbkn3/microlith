@@ -1,0 +1,1 @@
+ADMIN_SECRET=replace-with-openssl-rand-hex-32

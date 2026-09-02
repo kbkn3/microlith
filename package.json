@@ -1,0 +1,26 @@
+{
+  "name": "microlith",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "typecheck": "tsc --noEmit",
+    "smoke": "node packages/core/test/smoke.mjs"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "5.20260825.1",
+    "typescript": "^5.9.2",
+    "wrangler": "4.125.0"
+  },
+  "cloudflare": {
+    "bindings": {
+      "ADMIN_SECRET": {
+        "description": "Protects the `/setup` page. Generate one with `openssl rand -hex 32`."
+      }
+    }
+  }
+}
