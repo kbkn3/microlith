@@ -1,0 +1,16 @@
+{
+  "name": "@microlith/blade",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node esbuild.config.mjs"
+  },
+  "dependencies": {
+    "@microlith/haft": "*"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2",
+    "obsidian": "1.13.1"
+  }
+}

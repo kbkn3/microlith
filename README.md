@@ -43,6 +43,7 @@ Compared to Obsidian Sync:
 ```
 wrangler.jsonc         Worker config (kept at the repo root for Deploy button compatibility)
 packages/core          石核 — Worker + Durable Object
+packages/blade         刃 — the Obsidian plugin
 packages/haft          柄 — MCP tool schemas shared by the remote and local servers
 ```
 
@@ -52,8 +53,13 @@ packages/haft          柄 — MCP tool schemas shared by the remote and local s
 npm install
 npm run dev
 npm run typecheck
-npm run smoke      # requires `npm run dev` in another terminal
+npm run smoke        # sync API, requires `npm run dev` in another terminal
+npm run test:blade   # sync engine against a running dev server
+npm run build:blade  # builds packages/blade/main.js for Obsidian
 ```
+
+The sync engine talks to an adapter rather than to Obsidian directly, so `test:blade` drives two
+simulated devices against a real server without launching Obsidian.
 
 ## License
 

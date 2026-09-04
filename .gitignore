@@ -2,3 +2,6 @@ node_modules/
 .wrangler/
 .dev.vars
 *.log
+main.js
+main.js.map
+.build.mjs

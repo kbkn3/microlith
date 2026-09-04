@@ -1,0 +1,10 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    // プラグインは Obsidian(Electron / Capacitor の WebView)で動くため、
+    // Workers の型ではなく DOM を使う。
+    "lib": ["es2022", "dom"],
+    "types": []
+  },
+  "include": ["src/**/*.ts"]
+}
