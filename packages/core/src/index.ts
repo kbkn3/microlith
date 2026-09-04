@@ -1,77 +1,151 @@
-import { DurableObject } from "cloudflare:workers";
-import { ALL_TOOLS } from "@microlith/haft";
-import { SCHEMA } from "./schema";
+import { contentHash } from "./rev";
+import type { Env } from "./env";
+import type { NoteIndex } from "./vault";
 
-type Env = {
-  VAULT: DurableObjectNamespace<VaultDO>;
-  ASSETS: R2Bucket;
-  SETUP_UI: Fetcher;
-  ADMIN_SECRET: string;
+export { VaultDO } from "./vault";
+
+/** Cloudflare のアカウントプラン依存の上限(§2-4)。超過は multipart にせず素直に弾く。 */
+const MAX_ASSET_BYTES = 100 * 1024 * 1024;
+
+const json = (body: unknown, status = 200) => Response.json(body, { status });
+
+/**
+ * WebSocket API はカスタムヘッダを送れないので、`Sec-WebSocket-Protocol` に
+ * `bearer, <token>` を載せる形も受ける。トークンをクエリ文字列に置くとアクセスログに残る。
+ */
+const bearer = (request: Request): string | null => {
+  const header = request.headers.get("Authorization")?.match(/^Bearer\s+(.+)$/)?.[1];
+  if (header) return header;
+  const offered = request.headers.get("Sec-WebSocket-Protocol")?.split(",").map((v) => v.trim());
+  return offered?.[0] === "bearer" && offered[1] ? offered[1] : null;
 };
 
-/** 石核(core) — Vault ごとに1つ。メタデータ・本文・インデックス・通知の中心。 */
-export class VaultDO extends DurableObject<Env> {
-  constructor(ctx: DurableObjectState, env: Env) {
-    super(ctx, env);
-    // hibernation から復帰するたび constructor が走るため、ここは冪等でなければならない。
-    for (const statement of SCHEMA) ctx.storage.sql.exec(statement);
-    // keepalive を自前で処理すると毎回 DO が起きて hibernation が無意味になる。
-    ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair("ping", "pong"));
-  }
-
-  async status() {
-    const [row] = [...this.ctx.storage.sql.exec<{ n: number }>("SELECT count(*) AS n FROM files")];
-    return {
-      files: row.n,
-      seq: this.currentSeq(),
-      databaseSize: this.ctx.storage.sql.databaseSize,
-      connectedDevices: this.ctx.getWebSockets().length,
-      tools: ALL_TOOLS.map((tool) => tool.name)
-    };
-  }
-
-  private currentSeq(): number {
-    const [row] = [...this.ctx.storage.sql.exec<{ value: string }>(
-      "SELECT value FROM meta WHERE key = 'seq'"
-    )];
-    return row ? Number(row.value) : 0;
-  }
-
-  async fetch(request: Request): Promise<Response> {
-    if (request.headers.get("Upgrade") !== "websocket") {
-      return new Response("expected websocket", { status: 426 });
-    }
-    const [client, server] = Object.values(new WebSocketPair());
-    const deviceId = new URL(request.url).searchParams.get("device") ?? "unknown";
-    // accept() ではなく acceptWebSocket() を使う。前者は接続中ずっと duration 課金され、
-    // 3端末を掴みっぱなしにすると無料枠の 13,000 GB-s/日 すら超える。
-    // tag に deviceId を入れておくと、発信元を除いたブロードキャストが書ける。
-    this.ctx.acceptWebSocket(server, [deviceId]);
-    return new Response(null, { status: 101, webSocket: client });
-  }
-
-  async webSocketMessage(ws: WebSocket, message: string | ArrayBuffer) {
-    const origin = this.ctx.getTags(ws)[0];
-    for (const peer of this.ctx.getWebSockets()) {
-      if (this.ctx.getTags(peer)[0] !== origin) peer.send(message);
-    }
-  }
-}
+/** タイミング差でシークレットを推測されないよう、長さと内容を一定時間で比べる。 */
+const secretEquals = (a: string, b: string): boolean => {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return diff === 0;
+};
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
-    const url = new URL(request.url);
-
-    // §5.3 のパス形。同期 API はこの下に生やす。
-    const vaultRoute = url.pathname.match(/^\/vault\/([^/]+)\/(ws|status)$/);
-    if (vaultRoute) {
-      const [, vaultId, action] = vaultRoute;
-      const vault = env.VAULT.getByName(vaultId);
-      return action === "ws"
-        ? vault.fetch(request)
-        : Response.json(await vault.status());
+    try {
+      return await route(request, env);
+    } catch (error) {
+      // 例外をそのまま投げると HTML のエラーページが返り、クライアントが JSON を
+      // 期待している経路が読めない失敗をする。境界で JSON に落とす。
+      console.error(error);
+      return json({ error: "internal", detail: String(error) }, 500);
     }
-
-    return env.SETUP_UI.fetch(request);
   }
 } satisfies ExportedHandler<Env>;
+
+async function route(request: Request, env: Env): Promise<Response> {
+    const url = new URL(request.url);
+    const route = url.pathname.match(/^\/vault\/([^/]+)\/(.+)$/);
+    if (!route) return env.SETUP_UI.fetch(request);
+
+    const [, vaultId, action] = route;
+    const vault = env.VAULT.getByName(vaultId);
+
+    // 管理操作は ADMIN_SECRET で守る。デバイストークンの発行元がここ(§4)。
+    if (action === "devices") {
+      const token = bearer(request);
+      if (!token || !secretEquals(token, env.ADMIN_SECRET)) {
+        return json({ error: "unauthorized" }, 401);
+      }
+      if (request.method === "POST") {
+        const { name, scope = "sync" } = await request.json<{ name: string; scope?: string }>();
+        const deviceToken = crypto.randomUUID().replaceAll("-", "");
+        const { id } = await vault.createDevice(name, scope, deviceToken);
+        // 平文のトークンを返すのはこの一度だけ。以降はハッシュしか持たない。
+        return json({ id, name, scope, token: deviceToken }, 201);
+      }
+      return json({ devices: await vault.listDevices() });
+    }
+
+    const token = bearer(request);
+    const device = token ? await vault.authenticate(token) : null;
+    if (!device) return json({ error: "unauthorized" }, 401);
+
+    switch (action) {
+      case "ws":
+        // タグに使うデバイス ID はクライアントの自己申告ではなく認証結果を使う。
+        return vault.fetch(new Request(request, {
+          headers: { ...Object.fromEntries(request.headers), "X-Device-Id": device.id }
+        }));
+
+      case "status":
+        return json(await vault.status());
+
+      case "changes": {
+        const since = Number(url.searchParams.get("since") ?? 0);
+        const result = await vault.changes(since, device.id);
+        return result.status === "resync-required"
+          ? json({ error: "resync-required", seq: result.seq }, 412)
+          : json(result);
+      }
+
+      case "file": {
+        const path = url.searchParams.get("path");
+        if (!path) return json({ error: "path required" }, 400);
+        const head = await vault.head(path);
+        if (!head || head.deleted === 1) return json({ error: "not found" }, 404);
+        if (head.kind === "note") {
+          const note = await vault.readNote(path);
+          return json(note);
+        }
+        // asset は content hash をキーにしているので、再送しても同じ場所に落ちる。
+        const object = await env.ASSETS.get(`assets/${head.rev}`);
+        if (!object) return json({ error: "object missing" }, 404);
+        return new Response(object.body, {
+          headers: { "content-type": "application/octet-stream", etag: head.rev }
+        });
+      }
+
+      case "push": {
+        if (device.scope === "mcp-read") return json({ error: "read-only token" }, 403);
+        const input = await request.json<{
+          path: string; baseRev: string | null; mtime: number;
+          body?: string; deleted?: boolean; index?: NoteIndex;
+        }>();
+        const result = await vault.push({ ...input, kind: "note" });
+        return result.status === "conflict" ? json(result, 409) : json(result);
+      }
+
+      case "asset": {
+        if (device.scope === "mcp-read") return json({ error: "read-only token" }, 403);
+        const path = url.searchParams.get("path");
+        if (!path) return json({ error: "path required" }, 400);
+        const size = Number(request.headers.get("content-length") ?? 0);
+        if (size > MAX_ASSET_BYTES) {
+          return json({ error: "too large", maxBytes: MAX_ASSET_BYTES }, 413);
+        }
+        const bytes = await request.arrayBuffer();
+        const rev = await contentHash(bytes);
+        // R2 に先に置く。DO の記録に失敗しても、キーが content hash なので
+        // 再送すれば同じ場所を上書きするだけで済む(orphan は GC 対象の重複でしかない)。
+        await env.ASSETS.put(`assets/${rev}`, bytes);
+        const result = await vault.push({
+          path, baseRev: url.searchParams.get("baseRev"), kind: "asset",
+          mtime: Number(url.searchParams.get("mtime") ?? Date.now()),
+          rev, size: bytes.byteLength
+        });
+        return result.status === "conflict" ? json(result, 409) : json(result);
+      }
+
+      case "deleted":
+        return json({ files: await vault.deletedFiles() });
+
+      case "restore": {
+        const path = url.searchParams.get("path");
+        if (!path) return json({ error: "path required" }, 400);
+        const result = await vault.restore(path);
+        return result.status === "conflict" ? json(result, 409) : json(result);
+      }
+
+      default:
+        return json({ error: "not found" }, 404);
+    }
+}
