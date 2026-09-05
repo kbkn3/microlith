@@ -115,6 +115,17 @@ assert.equal(restored.body.status, "ok", "復元できない");
 const back = await call("file", { token: device, query: "?path=note.md" });
 assert.ok(back.body.body.includes("追記 4"), "復元した本文が違う");
 
+// --- CORS を開けていないこと ---------------------------------------------------
+
+// Obsidian のプラグインは requestUrl(メインプロセス)で叩く。認証付き API を
+// 任意の web オリジンに開かないという判断を、ここで固定しておく。
+const preflight = await fetch(`${base}/vault/${vault}/changes`, {
+  method: "OPTIONS",
+  headers: { Origin: "https://example.com", "Access-Control-Request-Method": "GET" }
+});
+assert.equal(preflight.headers.get("access-control-allow-origin"), null,
+  "CORS を開けている。ブラウザから叩けるようにするなら意図的な判断が要る");
+
 // --- 添付(R2 経由) ----------------------------------------------------------------
 
 const bytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 1, 2, 3, 4, 5]);

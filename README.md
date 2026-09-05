@@ -20,6 +20,15 @@ server are not implemented yet. See `microlith-handoff.md` for the design record
 - You will be asked for an `ADMIN_SECRET`, which protects the setup page.
   Generate one with `openssl rand -hex 32`.
 
+## Setup
+
+Open your Worker's URL after deploying. Enter the `ADMIN_SECRET` you chose, pick a vault name, and
+issue a token for each device. Paste that token into the plugin's settings.
+
+Tokens come in three scopes: `sync` for the Obsidian plugin, and `mcp-read` / `mcp-write` for
+Claude. The server only stores a hash, so a token is shown once and cannot be recovered — revoke it
+and issue a new one instead.
+
 ## Design decisions
 
 Microlith is **plaintext, self-hosted only**. There is no end-to-end encryption mode and no managed
@@ -32,7 +41,7 @@ Compared to Obsidian Sync:
 | | Obsidian Sync | Microlith |
 |---|---|---|
 | Conflicts | merge by default, or conflict file | conflict file only (merge planned) |
-| Version history | notes 1 month, attachments 2 weeks | none |
+| Version history | notes 1 month, attachments 2 weeks | not yet, planned |
 | Deleted file recovery | yes | yes, 30 days |
 | Images / audio / video / PDF | excluded by default | same |
 | Max file size | 5 MB / 200 MB by plan | 100 MB |

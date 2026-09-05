@@ -1,5 +1,5 @@
-import { App, Notice, Plugin, PluginSettingTab, Setting, TFile, debounce } from "obsidian";
-import { MicrolithClient, type NoteIndex } from "./client";
+import { App, Notice, Plugin, PluginSettingTab, Setting, TFile, debounce, requestUrl } from "obsidian";
+import { MicrolithClient, type HttpClient, type NoteIndex } from "./client";
 import { SyncEngine, type VaultAdapter } from "./sync";
 import { PluginState, type PersistedState } from "./state";
 
@@ -24,6 +24,29 @@ const DEFAULT_CONFIGURATION: Configuration = {
 /** 再接続の間隔。落ちたサーバに詰め寄らないよう指数的に伸ばす。 */
 const RECONNECT_BASE_MS = 1_000;
 const RECONNECT_MAX_MS = 60_000;
+
+/**
+ * `fetch` はレンダラのオリジンから出るため CORS プリフライトが起きて弾かれる。
+ * `requestUrl` はメインプロセスから出るので、サーバ側に CORS を開けずに済む。
+ * WebSocket はプリフライトの対象外なので、そちらはそのままでよい。
+ */
+const obsidianHttp: HttpClient = async (url, init) => {
+  const response = await requestUrl({
+    url,
+    method: init.method ?? "GET",
+    headers: init.headers,
+    body: init.body,
+    throw: false
+  });
+  return {
+    ok: response.status >= 200 && response.status < 300,
+    status: response.status,
+    text: async () => response.text,
+    json: async () => response.json,
+    arrayBuffer: async () => response.arrayBuffer,
+    headers: { get: (name) => response.headers[name] ?? response.headers[name.toLowerCase()] ?? null }
+  };
+};
 
 export default class MicrolithPlugin extends Plugin {
   private configuration: Configuration = { ...DEFAULT_CONFIGURATION };
@@ -62,7 +85,9 @@ export default class MicrolithPlugin extends Plugin {
     const state = new PluginState(stored.state ?? null, async (next) => {
       await this.saveData({ ...this.configuration, state: next });
     });
-    const client = new MicrolithClient(this.configuration.endpoint, this.configuration.vaultId, this.configuration.token);
+    const client = new MicrolithClient(
+      this.configuration.endpoint, this.configuration.vaultId, this.configuration.token, obsidianHttp
+    );
     this.engine = new SyncEngine(client, this.adapter(), state, {
       deviceName: this.configuration.deviceName,
       syncAllFileTypes: this.configuration.syncAllFileTypes,

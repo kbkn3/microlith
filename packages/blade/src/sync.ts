@@ -1,3 +1,4 @@
+import { contentHash } from "@microlith/haft";
 import { MicrolithClient, type Change, type NoteIndex } from "./client";
 
 /**
@@ -185,15 +186,37 @@ export class SyncEngine {
     return applied;
   }
 
+  /** ローカルの実体から rev を計算する。無ければ null。 */
+  private async localRev(path: string, kind: "note" | "asset"): Promise<string | null> {
+    if (!(await this.vault.exists(path))) return null;
+    const body = kind === "note" ? await this.vault.read(path) : await this.vault.readBinary(path);
+    return contentHash(body);
+  }
+
   private async applyChange(change: Change): Promise<boolean> {
     if (isExcluded(change.path, this.options.syncAllFileTypes)) return false;
     if (this.state.revOf(change.path) === change.rev) return false;
+
+    const local = await this.localRev(change.path, change.kind);
+
+    // 手元が既にリモートと同一なら、rev を覚えるだけでよい。
+    // 同じ Vault をコピーした端末に入れたときに、全ファイルが競合になるのを防ぐ。
+    if (local !== null && local === change.rev) {
+      this.state.setRev(change.path, change.rev);
+      return false;
+    }
+
+    // 端末を止めている間に自分でも編集していた場合、リモートをそのまま書くとその編集が消える。
+    // 競合検知は push 側だけでは足りない。
+    const diverged = local !== null && local !== this.state.revOf(change.path);
 
     if (change.deleted) {
       if (!(await this.vault.exists(change.path))) {
         this.state.setRev(change.path, null);
         return false;
       }
+      // ローカルの編集を削除で消さない。push 側に回せば競合コピーとして残る。
+      if (diverged) return false;
       await this.applyRemote(change.path, () => this.vault.remove(change.path));
       this.state.setRev(change.path, null);
       return true;
@@ -201,10 +224,19 @@ export class SyncEngine {
 
     if (change.kind === "note") {
       const note = await this.client.readNote(change.path);
+      if (diverged) {
+        const localBody = await this.vault.read(change.path);
+        await this.resolveNoteConflict(change.path, localBody, { rev: note.rev, body: note.body });
+        return true;
+      }
       await this.applyRemote(change.path, () => this.vault.write(change.path, note.body));
       this.state.setRev(change.path, note.rev);
     } else {
       const data = await this.client.readAsset(change.path);
+      if (diverged) {
+        // 添付は競合コピーを作らずリモートを採用する(push 側と同じ扱い)
+        this.notice(`${change.path} was replaced by the version from another device.`);
+      }
       await this.applyRemote(change.path, () => this.vault.writeBinary(change.path, data));
       this.state.setRev(change.path, change.rev);
     }

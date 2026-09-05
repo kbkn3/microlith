@@ -107,6 +107,44 @@ assert.equal(phone.vault.files.get(copies[0]), "# 細石刃\n\n電話の編集�
 await laptop.engine.pull();
 assert.ok(laptop.vault.files.has(copies[0]), "競合コピーが他端末に届いていない");
 
+// --- オフライン中の編集が pull で消えないこと -------------------------------------
+
+// 端末を止めている間に他端末が編集し、再開したときに自分の編集が残っているか。
+// pull 側に競合検知が無いと、ここで黙って消える。
+await laptop.vault.write("offline.md", "# オフライン検証\n\n共通の出発点。\n");
+await laptop.engine.pushPath("offline.md");
+await phone.engine.pull();
+assert.equal(phone.vault.files.get("offline.md"), "# オフライン検証\n\n共通の出発点。\n");
+
+// phone を止めている間に laptop が編集
+await laptop.vault.write("offline.md", "# オフライン検証\n\nラップトップ側の続き。\n");
+await laptop.engine.pushPath("offline.md");
+
+// phone は止まったまま自分でも編集(push はしていない)
+await phone.vault.write("offline.md", "# オフライン検証\n\n電話側で書いた大事な文章。\n");
+
+// 再開: pull が先に走る
+await phone.engine.pull();
+
+const offlineCopies = [...phone.vault.files.keys()]
+  .filter((path) => path.startsWith("offline (Conflicted copy"));
+assert.equal(offlineCopies.length, 1,
+  "オフライン中の編集が競合コピーになっていない(上書きで消えた可能性)");
+assert.equal(phone.vault.files.get(offlineCopies[0]), "# オフライン検証\n\n電話側で書いた大事な文章。\n",
+  "オフライン中に書いた本文が失われている");
+assert.equal(phone.vault.files.get("offline.md"), "# オフライン検証\n\nラップトップ側の続き。\n",
+  "原本にリモート版が入っていない");
+
+// --- 同一内容の端末を後から繋いでも競合にならないこと ---------------------------------
+
+// Vault をコピーして別端末に入れた場合。中身が同じなら競合コピーは作らない。
+const clone = await makeDevice("clone");
+for (const [path, body] of laptop.vault.files) await clone.vault.write(path, body);
+await clone.engine.pull();
+// 手元と同じ内容なのだから、この端末名の競合コピーは1つも生まれないはず
+const madeHere = [...clone.vault.files.keys()].filter((path) => path.includes("Conflicted copy clone"));
+assert.deepEqual(madeHere, [], "同一内容なのに競合コピーを作っている");
+
 // --- 削除 ---------------------------------------------------------------------
 
 await laptop.vault.remove("note.md");

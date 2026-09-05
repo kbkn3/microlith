@@ -22,11 +22,34 @@ export class ServerError extends Error {
   }
 }
 
+/**
+ * Obsidian のレンダラは `app://obsidian.md` オリジンで動くため、`Authorization` を付けた
+ * `fetch` は CORS プリフライトを起こして失敗する。サーバを任意の web オリジンに開くのではなく、
+ * 呼び出し側が Obsidian の `requestUrl`(メインプロセス経由)を挿せるようにする。
+ * 既定はそのまま `fetch` なので、Obsidian の外からも同じクライアントが使える。
+ */
+export type HttpResponse = {
+  ok: boolean;
+  status: number;
+  text(): Promise<string>;
+  json(): Promise<any>;
+  arrayBuffer(): Promise<ArrayBuffer>;
+  headers: { get(name: string): string | null };
+};
+
+export type HttpClient = (
+  url: string,
+  init: { method?: string; headers?: Record<string, string>; body?: string | ArrayBuffer }
+) => Promise<HttpResponse>;
+
+const defaultHttp: HttpClient = (url, init) => fetch(url, init as RequestInit);
+
 export class MicrolithClient {
   constructor(
     private readonly endpoint: string,
     private readonly vaultId: string,
-    private readonly token: string
+    private readonly token: string,
+    private readonly http: HttpClient = defaultHttp
   ) {}
 
   private url(action: string, query: Record<string, string> = {}): string {
@@ -35,8 +58,11 @@ export class MicrolithClient {
     return url.toString();
   }
 
-  private async request(url: string, init: RequestInit = {}): Promise<Response> {
-    const response = await fetch(url, {
+  private async request(
+    url: string,
+    init: { method?: string; headers?: Record<string, string>; body?: string | ArrayBuffer } = {}
+  ): Promise<HttpResponse> {
+    const response = await this.http(url, {
       ...init,
       headers: { Authorization: `Bearer ${this.token}`, ...init.headers }
     });

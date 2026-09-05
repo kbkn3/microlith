@@ -62,11 +62,23 @@ async function route(request: Request, env: Env): Promise<Response> {
         // 平文のトークンを返すのはこの一度だけ。以降はハッシュしか持たない。
         return json({ id, name, scope, token: deviceToken }, 201);
       }
+      if (request.method === "DELETE") {
+        const id = url.searchParams.get("id");
+        if (!id) return json({ error: "id required" }, 400);
+        await vault.revokeDevice(id);
+        return json({ revoked: id });
+      }
       return json({ devices: await vault.listDevices() });
     }
 
     const token = bearer(request);
-    const device = token ? await vault.authenticate(token) : null;
+    // ADMIN_SECRET は全 Vault の管理権限を兼ねる。`/setup` が状態や削除一覧を
+    // 読むのに、わざわざ自分用のデバイストークンを発行させる必要はない。
+    const device = !token
+      ? null
+      : secretEquals(token, env.ADMIN_SECRET)
+        ? { id: "admin", scope: "admin" }
+        : await vault.authenticate(token);
     if (!device) return json({ error: "unauthorized" }, 401);
 
     switch (action) {
@@ -81,7 +93,7 @@ async function route(request: Request, env: Env): Promise<Response> {
 
       case "changes": {
         const since = Number(url.searchParams.get("since") ?? 0);
-        const result = await vault.changes(since, device.id);
+        const result = await vault.changes(since, device.id === "admin" ? null : device.id);
         return result.status === "resync-required"
           ? json({ error: "resync-required", seq: result.seq }, 412)
           : json(result);
