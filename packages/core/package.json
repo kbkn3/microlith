@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "dependencies": {
-    "@microlith/haft": "*"
+    "@microlith/haft": "*",
+    "hono": "^4.13.5"
   }
 }

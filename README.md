@@ -63,6 +63,7 @@ npm install
 npm run dev
 npm run typecheck
 npm run smoke        # sync API, requires `npm run dev` in another terminal
+npm run test:mcp     # MCP endpoint against a running dev server
 npm run test:blade   # sync engine against a running dev server
 npm run build:blade  # builds packages/blade/main.js for Obsidian
 ```

@@ -17,10 +17,11 @@ export async function contentHash(body: string | ArrayBuffer): Promise<string> {
 
 export type ToolDefinition = {
   readonly name: string;
+  readonly title?: string;
   readonly description: string;
   readonly inputSchema: {
     readonly type: "object";
-    readonly properties: Record<string, unknown>;
+    readonly properties: Record<string, { readonly type?: string; readonly description?: string }>;
     readonly required?: readonly string[];
   };
 };
@@ -29,23 +30,91 @@ export type ToolDefinition = {
 export const STRUCTURE_TOOLS: readonly ToolDefinition[] = [
   {
     name: "vault_tree",
-    description: "Vault のフォルダ階層を返す",
-    inputSchema: { type: "object", properties: { depth: { type: "number" } } }
+    title: "Vault tree",
+    description:
+      "List the folder structure of the vault. Use this first to see what is in the vault " +
+      "before reaching for other tools.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        depth: { type: "number", description: "How many folder levels to descend. Defaults to 3." },
+        prefix: { type: "string", description: "Only show this folder and below." }
+      }
+    }
   },
   {
     name: "note_outline",
-    description: "ノートの見出しツリーを返す",
-    inputSchema: { type: "object", properties: { path: { type: "string" } }, required: ["path"] }
+    title: "Note outline",
+    description:
+      "Return the heading structure of one note. Pair this with read_section to read part of a " +
+      "long note instead of the whole thing.",
+    inputSchema: {
+      type: "object",
+      properties: { path: { type: "string", description: "Vault-relative path, e.g. notes/idea.md" } },
+      required: ["path"]
+    }
   },
   {
     name: "backlinks",
-    description: "指定ノートへの被リンクを返す",
-    inputSchema: { type: "object", properties: { path: { type: "string" } }, required: ["path"] }
+    title: "Backlinks",
+    description: "List the notes that link to this note.",
+    inputSchema: {
+      type: "object",
+      properties: { path: { type: "string" } },
+      required: ["path"]
+    }
   },
   {
     name: "outlinks",
-    description: "指定ノートからの発リンクを返す",
-    inputSchema: { type: "object", properties: { path: { type: "string" } }, required: ["path"] }
+    title: "Outgoing links",
+    description: "List the notes this note links to, including embeds.",
+    inputSchema: {
+      type: "object",
+      properties: { path: { type: "string" } },
+      required: ["path"]
+    }
+  },
+  {
+    name: "graph_neighborhood",
+    title: "Graph neighborhood",
+    description:
+      "Return the notes within a few link hops of this one, with the edges between them. " +
+      "Use this to understand how an idea connects to the rest of the vault.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        path: { type: "string" },
+        hops: { type: "number", description: "How many link hops to follow. Defaults to 2." }
+      },
+      required: ["path"]
+    }
+  },
+  {
+    name: "orphan_notes",
+    title: "Orphan notes",
+    description: "List notes that nothing links to and that link to nothing.",
+    inputSchema: {
+      type: "object",
+      properties: { limit: { type: "number", description: "Defaults to 50." } }
+    }
+  },
+  {
+    name: "hub_notes",
+    title: "Hub notes",
+    description: "List the most heavily linked notes, most connected first.",
+    inputSchema: {
+      type: "object",
+      properties: { limit: { type: "number", description: "Defaults to 20." } }
+    }
+  },
+  {
+    name: "find_by_tag",
+    title: "Find notes by tag",
+    description: "List the notes carrying a tag. Omit the tag to list every tag with its count.",
+    inputSchema: {
+      type: "object",
+      properties: { tag: { type: "string", description: "Without the leading #." } }
+    }
   }
 ];
 
@@ -53,13 +122,46 @@ export const STRUCTURE_TOOLS: readonly ToolDefinition[] = [
 export const CONTENT_TOOLS: readonly ToolDefinition[] = [
   {
     name: "read_note",
-    description: "ノート本文を返す",
-    inputSchema: { type: "object", properties: { path: { type: "string" } }, required: ["path"] }
+    title: "Read note",
+    description: "Return the full text of a note.",
+    inputSchema: {
+      type: "object",
+      properties: { path: { type: "string" } },
+      required: ["path"]
+    }
+  },
+  {
+    name: "read_section",
+    title: "Read section",
+    description: "Return one section of a note, identified by its heading.",
+    inputSchema: {
+      type: "object",
+      properties: { path: { type: "string" }, heading: { type: "string" } },
+      required: ["path", "heading"]
+    }
   },
   {
     name: "search",
-    description: "全文検索。3文字以上は FTS5、2文字以下は部分一致にフォールバックする",
-    inputSchema: { type: "object", properties: { query: { type: "string" } }, required: ["query"] }
+    title: "Search",
+    description:
+      "Full text search across the vault. Queries of three characters or more use the index; " +
+      "shorter ones fall back to a substring scan.",
+    inputSchema: {
+      type: "object",
+      properties: { query: { type: "string" }, limit: { type: "number" } },
+      required: ["query"]
+    }
+  },
+  {
+    name: "write_note",
+    title: "Write note",
+    description:
+      "Create or replace a note. The change syncs to every connected device immediately.",
+    inputSchema: {
+      type: "object",
+      properties: { path: { type: "string" }, content: { type: "string" } },
+      required: ["path", "content"]
+    }
   }
 ];
 

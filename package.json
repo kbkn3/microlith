@@ -11,7 +11,8 @@
     "typecheck": "tsc --noEmit && tsc --noEmit -p packages/blade",
     "smoke": "node packages/core/test/smoke.mjs",
     "build:blade": "npm run build --workspace @microlith/blade",
-    "test:blade": "esbuild packages/blade/test/sync.test.mjs --bundle --platform=node --format=esm --outfile=packages/blade/test/.build.mjs --log-level=warning && node packages/blade/test/.build.mjs"
+    "test:blade": "esbuild packages/blade/test/sync.test.mjs --bundle --platform=node --format=esm --outfile=packages/blade/test/.build.mjs --log-level=warning && node packages/blade/test/.build.mjs",
+    "test:mcp": "node packages/core/test/mcp.test.mjs"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "5.20260825.1",

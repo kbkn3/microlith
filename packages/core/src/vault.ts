@@ -270,6 +270,101 @@ export class VaultDO extends DurableObject<Env> {
     )];
   }
 
+  // --- 構造クエリ(MCP 構造系ツールの実体) --------------------------------------
+
+  /** プラグインが push したインデックスだけを見るので、本文を読まずに答えられる。 */
+  async structure(tool: string, args: Record<string, unknown>): Promise<unknown> {
+    switch (tool) {
+      case "vault_tree":
+        return this.tree(Number(args.depth ?? 3), String(args.prefix ?? ""));
+      case "note_outline":
+        return [...this.sql.exec(
+          "SELECT level, text, line FROM headings WHERE path = ? ORDER BY line", args.path
+        )];
+      case "backlinks":
+        return [...this.sql.exec(
+          `SELECT DISTINCT l.src_path AS path, n.title AS title FROM links l
+           LEFT JOIN notes n ON n.path = l.src_path
+           WHERE l.dst_path = ? ORDER BY l.src_path`, args.path
+        )];
+      case "outlinks":
+        return [...this.sql.exec(
+          `SELECT DISTINCT l.dst_path AS path, l.kind AS kind, n.title AS title FROM links l
+           LEFT JOIN notes n ON n.path = l.dst_path
+           WHERE l.src_path = ? ORDER BY l.dst_path`, args.path
+        )];
+      case "graph_neighborhood":
+        return this.neighborhood(String(args.path), Number(args.hops ?? 2));
+      case "orphan_notes":
+        return [...this.sql.exec(
+          `SELECT f.path FROM files f
+           WHERE f.deleted = 0 AND f.kind = 'note'
+             AND f.path NOT IN (SELECT src_path FROM links)
+             AND f.path NOT IN (SELECT dst_path FROM links)
+           ORDER BY f.path LIMIT ?`, Number(args.limit ?? 50)
+        )];
+      case "hub_notes":
+        return [...this.sql.exec(
+          `SELECT path, count(*) AS degree FROM (
+             SELECT src_path AS path FROM links
+             UNION ALL
+             SELECT dst_path AS path FROM links
+           ) GROUP BY path ORDER BY degree DESC, path LIMIT ?`, Number(args.limit ?? 20)
+        )];
+      case "find_by_tag":
+        return args.tag
+          ? [...this.sql.exec("SELECT DISTINCT path FROM tags WHERE tag = ? ORDER BY path", args.tag)]
+          : [...this.sql.exec(
+              "SELECT tag, count(*) AS notes FROM tags GROUP BY tag ORDER BY notes DESC, tag"
+            )];
+      default:
+        throw new Error(`unknown tool: ${tool}`);
+    }
+  }
+
+  private tree(depth: number, prefix: string) {
+    const rows = [...this.sql.exec<{ path: string }>(
+      "SELECT path FROM files WHERE deleted = 0 AND path LIKE ? ORDER BY path", `${prefix}%`
+    )];
+    const folders = new Map<string, number>();
+    const notes: string[] = [];
+    for (const { path } of rows) {
+      const segments = path.split("/");
+      if (segments.length === 1) {
+        notes.push(path);
+        continue;
+      }
+      // depth を超える階層はまとめて数だけ返す。全パスを列挙するとトークンを食う。
+      const folder = segments.slice(0, Math.min(depth, segments.length - 1)).join("/");
+      folders.set(folder, (folders.get(folder) ?? 0) + 1);
+    }
+    return {
+      folders: [...folders].map(([path, files]) => ({ path, files })).sort((a, b) => a.path.localeCompare(b.path)),
+      rootNotes: notes,
+      totalFiles: rows.length
+    };
+  }
+
+  private neighborhood(path: string, hops: number) {
+    // 再帰 CTE で n-hop の部分グラフを取る。リンクは無向として辿る。
+    const nodes = [...this.sql.exec<{ path: string; hop: number }>(
+      `WITH RECURSIVE reachable(path, hop) AS (
+         SELECT ?, 0
+         UNION
+         SELECT CASE WHEN l.src_path = r.path THEN l.dst_path ELSE l.src_path END, r.hop + 1
+         FROM links l JOIN reachable r ON l.src_path = r.path OR l.dst_path = r.path
+         WHERE r.hop < ?
+       )
+       SELECT path, min(hop) AS hop FROM reachable GROUP BY path ORDER BY hop, path`,
+      path, Math.max(0, Math.min(hops, 5))
+    )];
+    const within = new Set(nodes.map((node) => node.path));
+    const edges = [...this.sql.exec<{ src_path: string; dst_path: string; kind: string }>(
+      "SELECT DISTINCT src_path, dst_path, kind FROM links"
+    )].filter((edge) => within.has(edge.src_path) && within.has(edge.dst_path));
+    return { nodes, edges: edges.map((e) => ({ from: e.src_path, to: e.dst_path, kind: e.kind })) };
+  }
+
   // --- 通知 -----------------------------------------------------------------
 
   private broadcast(seq: number, origin?: string): void {
