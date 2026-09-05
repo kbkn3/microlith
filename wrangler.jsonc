@@ -12,6 +12,9 @@
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["VaultDO"] }],
   // ボタンはリソース名のデフォルト値を必要とする。provision 後に Cloudflare が書き換える。
   "r2_buckets": [{ "binding": "ASSETS", "bucket_name": "microlith-assets" }],
+  // OAuth の認可コードとトークンの保管先。バインディング名はライブラリが要求する。
+  // id を書かないと wrangler が deploy 時に作る。Deploy ボタンでも同じく provision される。
+  "kv_namespaces": [{ "binding": "OAUTH_KV" }],
   // 素の HTML で配信し build ステップを不要にしている。ビルド設定が空欄のままボタンが通る。
   "assets": { "directory": "./packages/core/public", "binding": "SETUP_UI" }
 }

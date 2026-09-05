@@ -1,6 +1,9 @@
 import { Hono } from "hono";
+import OAuthProvider from "@cloudflare/workers-oauth-provider";
+import { authorize } from "./authorize";
+import mcpApi from "./mcp-api";
 import { contentHash } from "./rev";
-import { handleMcp } from "./mcp";
+import { allowedOriginsFrom, createVaultMcpHandler, originAllowed } from "./mcp";
 import type { Env } from "./env";
 import type { NoteIndex, VaultDO } from "./vault";
 
@@ -97,13 +100,13 @@ app.delete("/vault/:vaultId/devices", requireAdmin, async (c) => {
 
 // --- 同期 -------------------------------------------------------------------
 
-// GET は 405、POST は JSON-RPC。判定は handleMcp が仕様どおりに行う。
-app.all("/vault/:vaultId/mcp", requireDevice, (c) =>
-  handleMcp(c.req.raw, c.get("vault"), {
-    canWrite: c.get("device").scope !== "mcp-read",
-    allowedOrigins: (c.env.MCP_ALLOWED_ORIGINS ?? "https://claude.ai,https://claude.com")
-      .split(",").map((value) => value.trim()).filter(Boolean)
-  }));
+// bearer で使う経路。OAuth を通さないクライアント(Claude Code や Messages API)向けに残す。
+app.all("/vault/:vaultId/mcp", requireDevice, (c) => {
+  if (!originAllowed(c.req.raw, allowedOriginsFrom(c.env.MCP_ALLOWED_ORIGINS))) {
+    return c.json({ error: "origin not allowed" }, 403);
+  }
+  return createVaultMcpHandler(c.get("vault")).fetch(c.req.raw);
+});
 
 app.get("/vault/:vaultId/ws", requireDevice, (c) =>
   // タグに使うデバイス ID はクライアントの自己申告ではなく認証結果を使う。
@@ -177,8 +180,25 @@ app.post("/vault/:vaultId/restore", requireDevice, requireWrite, async (c) => {
   return result.status === "conflict" ? c.json(result, 409) : c.json(result);
 });
 
-// --- `/setup` ---------------------------------------------------------------
+// --- OAuth の同意画面と `/setup` ------------------------------------------------
 
+app.route("/", authorize);
 app.all("*", (c) => c.env.SETUP_UI.fetch(c.req.raw));
 
-export default app;
+/**
+ * OAuth 2.1 のプロバイダで全体を包む。MCP の認可仕様は
+ * PKCE / 動的クライアント登録 / トークンの audience 検証まで要求していて、
+ * 自前で書くには危険が大きすぎる(§21)。
+ *
+ * `/mcp` だけがトークンで守られ、それ以外(同期 API、`/setup`、同意画面)は
+ * これまで通り Hono のアプリが受ける。
+ */
+export default new OAuthProvider({
+  apiRoute: "/mcp",
+  apiHandler: mcpApi as any,
+  defaultHandler: app as any,
+  authorizeEndpoint: "/authorize",
+  tokenEndpoint: "/token",
+  clientRegistrationEndpoint: "/register",
+  scopesSupported: ["mcp-read", "mcp-write"]
+});

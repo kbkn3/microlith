@@ -4,7 +4,9 @@
   "private": true,
   "type": "module",
   "dependencies": {
+    "@cloudflare/workers-oauth-provider": "^0.10.3",
     "@microlith/haft": "*",
+    "@modelcontextprotocol/server": "^2.0.0",
     "hono": "^4.13.5"
   }
 }
