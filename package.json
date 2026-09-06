@@ -13,7 +13,8 @@
     "build:blade": "npm run build --workspace @microlith/blade",
     "test:blade": "esbuild packages/blade/test/sync.test.mjs --bundle --platform=node --format=esm --outfile=packages/blade/test/.build.mjs --log-level=warning && node packages/blade/test/.build.mjs",
     "test:mcp": "node packages/core/test/mcp.test.mjs",
-    "test:oauth": "node packages/core/test/oauth.test.mjs"
+    "test:oauth": "node packages/core/test/oauth.test.mjs",
+    "test:registry": "esbuild packages/core/test/registry.test.mjs --bundle --platform=node --format=esm --outfile=packages/core/test/.build.mjs --log-level=warning && node packages/core/test/.build.mjs"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "5.20260825.1",

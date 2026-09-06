@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import type { AuthRequest } from "@cloudflare/workers-oauth-provider";
+import { knownVaults, rememberVault } from "./registry";
 import type { Env, GrantProps } from "./env";
 
 /**
@@ -14,7 +15,7 @@ const escape = (value: string) =>
   value.replace(/[&<>"']/g, (c) =>
     ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
 
-const page = (request: AuthRequest, clientName: string, error?: string) => `<!doctype html>
+const page = (request: AuthRequest, clientName: string, vaults: string[], error?: string) => `<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Authorize ${escape(clientName)}</title>
@@ -39,6 +40,8 @@ const page = (request: AuthRequest, clientName: string, error?: string) => `<!do
            border-color:transparent; font-weight:600; }
   .error { color:var(--danger); font-size:0.9rem; margin-top:1rem; }
   .grants { margin:0; padding-left:1.1rem; color:var(--muted); font-size:0.9rem; }
+  /* label に display を指定すると hidden 属性が効かなくなる */
+  [hidden] { display:none !important; }
 </style>
 <main>
   <h1>Authorize ${escape(clientName)}</h1>
@@ -49,7 +52,17 @@ const page = (request: AuthRequest, clientName: string, error?: string) => `<!do
   </ul>
   <form method="post">
     <label for="vaultId">Vault</label>
+    ${vaults.length > 0 ? `
+    <select id="vaultId" name="vaultId">
+      ${vaults.map((vault) => `<option value="${escape(vault)}">${escape(vault)}</option>`).join("")}
+      <option value="">Create a new vault…</option>
+    </select>
+    <label for="newVaultId" id="newVaultLabel" hidden>New vault name</label>
+    <input id="newVaultId" name="newVaultId" hidden>
+    ` : `
+    <p class="lead">No vault has been set up yet. Naming one here creates it.</p>
     <input id="vaultId" name="vaultId" value="default" required>
+    `}
     <label for="scope">Access</label>
     <select id="scope" name="scope">
       <option value="mcp-read">Read only</option>
@@ -60,7 +73,25 @@ const page = (request: AuthRequest, clientName: string, error?: string) => `<!do
     ${error ? `<p class="error">${escape(error)}</p>` : ""}
     <button type="submit">Authorize</button>
   </form>
-</main>`;
+</main>
+<script>
+  // 新しい名前を打つ欄は「新規作成」を選んだときだけ出す。
+  // 常に見えていると、既存を選んだのに名前も入れる操作に見えてしまう。
+  const picker = document.getElementById("vaultId");
+  const label = document.getElementById("newVaultLabel");
+  const field = document.getElementById("newVaultId");
+  if (picker && picker.tagName === "SELECT") {
+    const sync = () => {
+      const creating = picker.value === "";
+      label.hidden = !creating;
+      field.hidden = !creating;
+      field.required = creating;
+      if (creating) field.focus();
+    };
+    picker.addEventListener("change", sync);
+    sync();
+  }
+</script>`;
 
 /** 同意画面は一度きりで完結するので、認可要求そのものを hidden ではなく再解析する。 */
 const parse = (c: { env: Env; req: { raw: Request } }) =>
@@ -69,23 +100,31 @@ const parse = (c: { env: Env; req: { raw: Request } }) =>
 authorize.get("/authorize", async (c) => {
   const request = await parse(c);
   const client = await c.env.OAUTH_PROVIDER.lookupClient(request.clientId);
-  return c.html(page(request, client?.clientName ?? request.clientId));
+  return c.html(page(request, client?.clientName ?? request.clientId, await knownVaults(c.env)));
 });
 
 authorize.post("/authorize", async (c) => {
   const request = await parse(c);
   const client = await c.env.OAUTH_PROVIDER.lookupClient(request.clientId);
   const form = await c.req.formData();
+  const vaults = await knownVaults(c.env);
   const secret = String(form.get("secret") ?? "");
-  const vaultId = String(form.get("vaultId") ?? "").trim();
+  // 選択が空なら「新規作成」。名前を打ち間違えて静かに空の Vault ができるのを防ぐ。
+  const chosen = String(form.get("vaultId") ?? "").trim();
+  const vaultId = chosen || String(form.get("newVaultId") ?? "").trim();
   const scope = String(form.get("scope") ?? "mcp-read") === "mcp-write" ? "mcp-write" : "mcp-read";
 
-  // 総当たりを避けるため、失敗の理由は分けずに一つの文言で返す。
-  if (secret !== c.env.ADMIN_SECRET || !vaultId) {
-    return c.html(page(request, client?.clientName ?? request.clientId,
+  // 総当たりを避けるため、認証の失敗理由は分けずに一つの文言で返す。
+  if (secret !== c.env.ADMIN_SECRET) {
+    return c.html(page(request, client?.clientName ?? request.clientId, vaults,
       "Could not authorize with those details."), 401);
   }
+  if (!vaultId) {
+    return c.html(page(request, client?.clientName ?? request.clientId, vaults,
+      "Pick a vault, or give the new one a name."), 400);
+  }
 
+  await rememberVault(c.env, vaultId);
   const props: GrantProps = { vaultId, scope };
   const { redirectTo } = await c.env.OAUTH_PROVIDER.completeAuthorization({
     request,

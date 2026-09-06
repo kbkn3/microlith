@@ -3,6 +3,7 @@ import OAuthProvider from "@cloudflare/workers-oauth-provider";
 import { authorize } from "./authorize";
 import mcpApi from "./mcp-api";
 import { contentHash } from "./rev";
+import { forgetVault, knownVaults, rememberVault } from "./registry";
 import { allowedOriginsFrom, createVaultMcpHandler, originAllowed } from "./mcp";
 import type { Env } from "./env";
 import type { NoteIndex, VaultDO } from "./vault";
@@ -87,6 +88,7 @@ app.post("/vault/:vaultId/devices", requireAdmin, async (c) => {
   const { name, scope = "sync" } = await c.req.json<{ name: string; scope?: string }>();
   const deviceToken = crypto.randomUUID().replaceAll("-", "");
   const { id } = await c.get("vault").createDevice(name, scope, deviceToken);
+  await rememberVault(c.env, c.req.param("vaultId"));
   // 平文のトークンを返すのはこの一度だけ。以降はハッシュしか持たない。
   return c.json({ id, name, scope, token: deviceToken }, 201);
 });
@@ -96,6 +98,45 @@ app.delete("/vault/:vaultId/devices", requireAdmin, async (c) => {
   if (!id) return c.json({ error: "id required" }, 400);
   await c.get("vault").revokeDevice(id);
   return c.json({ revoked: id });
+});
+
+/**
+ * どのクライアントがどの Vault に紐づいているか。
+ * これが見えないと、空の結果が「同期されていない」のか
+ * 「別の Vault を見ている」のか区別できない(§24.2)。
+ */
+app.get("/grants", requireAdmin, async (c) => {
+  const page = await c.env.OAUTH_PROVIDER.listUserGrants("owner");
+  // grant はクライアント名を持たないので引き直す。ID だけでは
+  // 「どのアプリがどの Vault を見ているか」が読めず、パネルの意味が無い。
+  const named = await Promise.all(page.items.map(async (grant: any) => {
+    const client = await c.env.OAUTH_PROVIDER.lookupClient(grant.clientId).catch(() => null);
+    return {
+      id: grant.id,
+      vaultId: grant.metadata?.vaultId ?? null,
+      clientName: client?.clientName ?? grant.clientId,
+      scope: grant.scope,
+      createdAt: grant.createdAt
+    };
+  }));
+  return c.json({ grants: named });
+});
+
+app.delete("/grants", requireAdmin, async (c) => {
+  const id = c.req.query("id");
+  if (!id) return c.json({ error: "id required" }, 400);
+  await c.env.OAUTH_PROVIDER.revokeGrant(id, "owner");
+  return c.json({ revoked: id });
+});
+
+app.get("/vaults", requireAdmin, async (c) => c.json({ vaults: await knownVaults(c.env) }));
+
+/** 添付は content hash をキーにしていて他 Vault と共有しうるので、R2 には触らない。 */
+app.delete("/vault/:vaultId/destroy", requireAdmin, async (c) => {
+  const vaultId = c.req.param("vaultId");
+  const result = await c.get("vault").destroy();
+  await forgetVault(c.env, vaultId);
+  return c.json({ destroyed: vaultId, ...result });
 });
 
 // --- 同期 -------------------------------------------------------------------

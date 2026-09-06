@@ -270,6 +270,20 @@ export class VaultDO extends DurableObject<Env> {
     )];
   }
 
+  /**
+   * Vault の中身を全部消す。DO 自体はストレージが空になれば処理系が回収する。
+   * 検証で作った Vault が本番に溜まっても消す手段が無かった(§23.3)。
+   */
+  async destroy(): Promise<{ files: number }> {
+    const [row] = [...this.sql.exec<{ n: number }>("SELECT count(*) AS n FROM files")];
+    for (const socket of this.ctx.getWebSockets()) socket.close(1001, "vault deleted");
+    await this.ctx.storage.deleteAll();
+    // deleteAll はスキーマごと消す。この DO はまだメモリに残っているので、
+    // 張り直さないと次のクエリが「テーブルが無い」で落ちる。
+    for (const statement of SCHEMA) this.sql.exec(statement);
+    return { files: row.n };
+  }
+
   // --- 構造クエリ(MCP 構造系ツールの実体) --------------------------------------
 
   /** プラグインが push したインデックスだけを見るので、本文を読まずに答えられる。 */

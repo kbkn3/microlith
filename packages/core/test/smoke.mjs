@@ -148,6 +148,44 @@ const resent = await fetch(
 ).then((r) => r.json());
 assert.equal(resent.status, "unchanged", "添付の再送が no-op になっていない");
 
+// --- Vault の削除 ----------------------------------------------------------------
+
+// 検証で作った Vault を消す手段が無いと本番に溜まり続ける(§23.3)
+const doomedVault = `doomed-${Date.now()}`;
+const doomedToken = await fetch(`${base}/vault/${doomedVault}/devices`, {
+  method: "POST",
+  headers: { Authorization: `Bearer ${admin}`, "content-type": "application/json" },
+  body: JSON.stringify({ name: "tmp" })
+}).then((r) => r.json()).then((d) => d.token);
+await fetch(`${base}/vault/${doomedVault}/push`, {
+  method: "POST",
+  headers: { Authorization: `Bearer ${doomedToken}`, "content-type": "application/json" },
+  body: JSON.stringify({ path: "x.md", baseRev: null, mtime: 1, body: "# 消える\n" })
+});
+
+const beforeDestroy = await fetch(`${base}/vault/${doomedVault}/status`, {
+  headers: { Authorization: `Bearer ${admin}` }
+}).then((r) => r.json());
+assert.equal(beforeDestroy.files, 1);
+
+assert.equal((await fetch(`${base}/vault/${doomedVault}/destroy`, { method: "DELETE" })).status, 401,
+  "誰でも Vault を消せてしまう");
+
+const destroyed = await fetch(`${base}/vault/${doomedVault}/destroy`, {
+  method: "DELETE", headers: { Authorization: `Bearer ${admin}` }
+}).then((r) => r.json());
+assert.equal(destroyed.files, 1, "消した件数が返らない");
+
+// 消したあとはトークンごと消えるので、元のトークンは通らない
+assert.equal((await fetch(`${base}/vault/${doomedVault}/status`, {
+  headers: { Authorization: `Bearer ${doomedToken}` }
+})).status, 401, "削除後もデバイストークンが生きている");
+
+const afterDestroy = await fetch(`${base}/vault/${doomedVault}/status`, {
+  headers: { Authorization: `Bearer ${admin}` }
+}).then((r) => r.json());
+assert.equal(afterDestroy.files, 0, "削除後もファイルが残っている");
+
 // --- WebSocket 通知 --------------------------------------------------------------
 
 // WebSocket はヘッダを付けられないので、サブプロトコルでトークンを渡す

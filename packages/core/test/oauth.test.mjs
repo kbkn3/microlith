@@ -195,4 +195,45 @@ assert.deepEqual(tree.body.result.structuredContent.rootNotes, ["bound.md"],
 assert.equal((await rpc("tools/list", {}, "not-a-real-token")).status, 401,
   "でたらめなトークンが通ってしまう");
 
+// --- 認可の観測(§24.2) -----------------------------------------------------------
+
+// どのクライアントがどの Vault に紐づいているかが見えないと、
+// 空の結果が「未同期」なのか「別 Vault を見ている」のか区別できない。
+// 一覧は KV の list() 越しなので結果整合。作りたての認可はすぐには出ない。
+// アクセストークンは `userId:grantId:secret` の形。
+const grantId = tokens.access_token.split(":")[1];
+const startedAt = Date.now();
+let mine = null;
+for (let attempt = 0; attempt < 20 && !mine; attempt++) {
+  const listing = await fetch(`${base}/grants`, { headers: { Authorization: `Bearer ${admin}` } })
+    .then((r) => r.json());
+  mine = listing.grants.find((g) => g.id === grantId);
+  if (!mine) await new Promise((resolve) => setTimeout(resolve, 500));
+}
+if (mine) console.log(`  認可が一覧に出るまで ${Date.now() - startedAt}ms`);
+assert.ok(mine, "トークンが指す認可が一覧に出ていない");
+assert.equal(mine.vaultId, vaultId, "認可が別の Vault に紐づいている");
+assert.ok(mine.clientName, "クライアント名が出ていない");
+assert.deepEqual(mine.scope, ["mcp-read"]);
+
+assert.equal((await fetch(`${base}/grants`)).status, 401, "grants が誰でも読めてしまう");
+
+// 使った Vault は控えに載り、同意画面が選択肢として出せる
+// 控えは単一キーの get なのですぐ出る(§28)。list() に戻したら10秒以上かかるので、
+// 待つ余地をわざと 2 秒に切って、退行をここで落とす。
+let listedVault = false;
+for (let attempt = 0; attempt < 4 && !listedVault; attempt++) {
+  const vaultList = await fetch(`${base}/vaults`, { headers: { Authorization: `Bearer ${admin}` } })
+    .then((r) => r.json());
+  listedVault = vaultList.vaults.includes(vaultId);
+  if (!listedVault) await new Promise((resolve) => setTimeout(resolve, 500));
+}
+assert.ok(listedVault, "Vault の控えに載っていない");
+
+// 失効させたらトークンが死ぬ
+await fetch(`${base}/grants?id=${mine.id}`, {
+  method: "DELETE", headers: { Authorization: `Bearer ${admin}` }
+});
+assert.equal((await rpc("tools/list", {})).status, 401, "失効させてもトークンが生きている");
+
 console.log(`oauth: ok (vault=${vaultId})`);

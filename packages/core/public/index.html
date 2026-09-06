@@ -113,6 +113,19 @@
     </div>
   </section>
 
+  <section id="grants-panel" hidden>
+    <h2>Connected apps</h2>
+    <p class="note">
+      Each authorization is tied to one vault. If an app sees an empty vault, check that it is
+      pointed at the one holding your notes. An app you just connected can take a moment to
+      appear here.
+    </p>
+    <table>
+      <thead><tr><th>App</th><th>Vault</th><th>Access</th><th></th></tr></thead>
+      <tbody id="grants"></tbody>
+    </table>
+  </section>
+
   <section id="deleted-panel" hidden>
     <h2>Deleted files</h2>
     <p class="note">Kept for 30 days, then removed for good.</p>
@@ -149,6 +162,17 @@ async function api(action, options = {}) {
   return response.json();
 }
 
+async function apiRoot(action, options = {}) {
+  const url = new URL(`/${action}`, location.origin);
+  for (const [key, value] of Object.entries(options.query ?? {})) url.searchParams.set(key, value);
+  const response = await fetch(url, {
+    method: options.method ?? "GET",
+    headers: { Authorization: `Bearer ${state.secret}` }
+  });
+  if (!response.ok) throw new Error(`${response.status} ${await response.text()}`);
+  return response.json();
+}
+
 const rememberVault = (vault) => {
   const known = new Set(JSON.parse(localStorage.getItem("microlith.vaults") ?? "[]"));
   known.add(vault);
@@ -157,8 +181,11 @@ const rememberVault = (vault) => {
   renderKnownVaults();
 };
 
-const renderKnownVaults = () => {
-  const known = JSON.parse(localStorage.getItem("microlith.vaults") ?? "[]");
+const renderKnownVaults = (fromServer = []) => {
+  const known = [...new Set([
+    ...JSON.parse(localStorage.getItem("microlith.vaults") ?? "[]"),
+    ...fromServer
+  ])].sort();
   $("known-vaults").innerHTML = "";
   for (const vault of known) {
     const option = document.createElement("option");
@@ -184,7 +211,11 @@ const stat = (label, value, kind = "") => {
 };
 
 async function refresh() {
-  const status = await api("status");
+  // 4つとも独立なので直列にすると往復が積み上がる。DO と KV への往復が実測を支配する。
+  const [status, deviceList, grantList, deletedList] = await Promise.all([
+    api("status"), api("devices"), apiRoot("grants"), api("deleted")
+  ]);
+
   $("stats").replaceChildren(
     stat("files", String(status.files)),
     stat("revision", String(status.seq)),
@@ -194,7 +225,7 @@ async function refresh() {
          status.ftsIntegrity === "ok" ? "ok" : "error")
   );
 
-  const { devices } = await api("devices");
+  const { devices } = deviceList;
   $("devices").replaceChildren(...devices.map((device) => {
     const row = document.createElement("tr");
     for (const text of [device.name, device.scope, `revision ${device.last_seen_seq}`]) {
@@ -216,7 +247,32 @@ async function refresh() {
     return row;
   }));
 
-  const { files } = await api("deleted");
+  const { grants } = grantList;
+  $("grants-panel").hidden = false;
+  $("grants").replaceChildren(...grants.map((grant) => {
+    const row = document.createElement("tr");
+    for (const text of [grant.clientName, grant.vaultId ?? "(unknown)", grant.scope.join(", ")]) {
+      const cell = document.createElement("td");
+      cell.textContent = text;
+      // 見ている Vault と違うものに紐づいた認可は、空の結果の原因になりやすい
+      if (text === grant.vaultId && grant.vaultId !== state.vault) cell.className = "error";
+      row.append(cell);
+    }
+    const actions = document.createElement("td");
+    const revoke = document.createElement("button");
+    revoke.className = "danger";
+    revoke.textContent = "Revoke";
+    revoke.onclick = async () => {
+      if (!confirm(`Revoke ${grant.clientName}? It will have to authorize again.`)) return;
+      await apiRoot("grants", { method: "DELETE", query: { id: grant.id } });
+      await refresh();
+    };
+    actions.append(revoke);
+    row.append(actions);
+    return row;
+  }));
+
+  const { files } = deletedList;
   $("deleted-panel").hidden = false;
   $("deleted").replaceChildren(...files.map((file) => {
     const row = document.createElement("tr");
@@ -244,7 +300,11 @@ $("connect").onclick = async () => {
   state.secret = $("secret").value.trim();
   state.vault = $("vault").value.trim() || "default";
   try {
+    // 一覧が引けなくても本体の操作は続けられるので、refresh と並べて先に投げる
+    const vaultList = apiRoot("vaults").catch(() => null);
     await refresh();
+    const listed = await vaultList;
+    if (listed) renderKnownVaults(listed.vaults);
     sessionStorage.setItem("microlith.secret", state.secret);
     rememberVault(state.vault);
     $("status-panel").hidden = false;
@@ -253,6 +313,7 @@ $("connect").onclick = async () => {
   } catch (error) {
     $("status-panel").hidden = true;
     $("devices-panel").hidden = true;
+    $("grants-panel").hidden = true;
     $("deleted-panel").hidden = true;
     note(String(error).includes("401")
       ? "That admin secret was not accepted."
