@@ -17,6 +17,7 @@ export default {
     if (!props?.vaultId) {
       return Response.json({ error: "grant is missing a vault" }, { status: 403 });
     }
-    return createVaultMcpHandler(env.VAULT.getByName(props.vaultId)).fetch(request);
+    return createVaultMcpHandler(env.VAULT.getByName(props.vaultId),
+      { canWrite: props.scope === "mcp-write" }).fetch(request);
   }
 };

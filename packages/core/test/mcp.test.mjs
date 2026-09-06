@@ -105,8 +105,10 @@ assert.ok(["public", "private"].includes(listed.body.result.cacheScope), "cacheS
 
 const names = listed.body.result.tools.map((t) => t.name);
 assert.ok(names.includes("vault_tree"));
-assert.ok(!names.includes("read_note"), "v1 の Remote は構造系のみのはず");
-assert.ok(!names.includes("search"), "本文検索が Remote に出ている");
+assert.ok(names.includes("read_note"), "本文系が Remote に出ていない");
+assert.ok(names.includes("search"));
+assert.ok(!names.includes("write_note"),
+  "read-only のトークンに書き込みツールが見えている");
 for (const t of listed.body.result.tools) {
   assert.ok(t.description, `${t.name} に description が無い`);
   assert.equal(t.inputSchema.type, "object");
@@ -179,5 +181,79 @@ assert.equal((await tool("hub_notes"))[0].path, "index.md",
 assert.deepEqual((await tool("find_by_tag", { tag: "考古" })).map((r) => r.path),
   ["notes/a.md", "notes/b.md"]);
 assert.deepEqual(await tool("find_by_tag"), [{ tag: "考古", notes: 2 }, { tag: "hub", notes: 1 }]);
+
+// --- 本文系ツール ---------------------------------------------------------------
+
+const note = await tool("read_note", { path: "notes/a.md" });
+assert.equal(note.body, "# A\n");
+assert.ok(note.rev, "rev が返らない");
+
+await push("long.md", "# 長いノート\n\n序文。\n\n## 前半\n\n前半の中身。\n\n## 後半\n\n後半の中身。\n", {
+  links: [], tags: [],
+  headings: [
+    { level: 1, text: "長いノート", line: 0, parentLine: 0 },
+    { level: 2, text: "前半", line: 4, parentLine: 0 },
+    { level: 2, text: "後半", line: 8, parentLine: 0 }
+  ]
+});
+const section = await tool("read_section", { path: "long.md", heading: "前半" });
+assert.ok(section.text.includes("前半の中身"), "節の中身が入っていない");
+assert.ok(!section.text.includes("後半の中身"), "次の節まで含めてしまっている");
+
+// 3文字以上は索引、2文字以下は部分一致(§10 の trigram の制約)
+const indexed = await tool("search", { query: "前半の中身" });
+assert.equal(indexed.mode, "index", "3文字以上で索引を使っていない");
+assert.ok(indexed.matches.some((m) => m.path === "long.md"), "索引検索で拾えていない");
+assert.ok(indexed.matches[0].snippet, "スニペットが返らない");
+
+const shortQuery = await tool("search", { query: "索引" });
+assert.equal(shortQuery.mode, "substring", "短い語で部分一致に落ちていない");
+assert.ok(shortQuery.matches.some((m) => m.path === "index.md"), "短い語で拾えていない");
+
+// FTS5 のクエリ構文を利用者の入力として解釈させない
+const weird = await tool("search", { query: 'AND OR "NEAR(' });
+assert.ok(Array.isArray(weird.matches), "特殊な文字列でクエリが壊れる");
+
+// --- 書き込み(mcp-write のトークンでのみ) ---------------------------------------------
+
+const writeToken = await issue("claude-write", "mcp-write");
+const writable = await call("tools/list", {}, { token: writeToken });
+assert.ok(writable.body.result.tools.map((t) => t.name).includes("write_note"),
+  "mcp-write でも書き込みツールが見えない");
+
+const written = await call("tools/call", {
+  name: "write_note",
+  arguments: { path: "claude-が書いた.md", content: "# Claude が書いた\n\n本文。\n" }
+}, { token: writeToken });
+assert.ok(!written.body.result.isError, `write_note が失敗: ${JSON.stringify(written.body)}`);
+
+const readBack = await tool("read_note", { path: "claude-が書いた.md" });
+assert.equal(readBack.body, "# Claude が書いた\n\n本文。\n", "書いた内容が読み戻せない");
+
+// write_note は同期プロトコルを通るので、接続中の端末に即座に通知が飛ぶ(§6)
+const watcher = await new Promise((resolve) => {
+  const socket = new WebSocket(`${base.replace(/^http/, "ws")}/vault/${vault}/ws`, ["bearer", syncToken]);
+  socket.inbox = [];
+  socket.addEventListener("message", (event) => socket.inbox.push(String(event.data)));
+  socket.addEventListener("open", () => resolve(socket));
+});
+await new Promise((r) => setTimeout(r, 300));
+
+await call("tools/call", {
+  name: "write_note",
+  arguments: { path: "通知の確認.md", content: "# 通知\n" }
+}, { token: writeToken });
+await new Promise((r) => setTimeout(r, 600));
+
+const notified = watcher.inbox.map((m) => JSON.parse(m)).find((m) => m.type === "changed");
+assert.ok(notified, "write_note が端末に通知されていない");
+watcher.close();
+
+// 読み取り専用のトークンでは呼べない
+const refused = await call("tools/call", {
+  name: "write_note", arguments: { path: "x.md", content: "x" }
+});
+assert.ok(refused.body.error || refused.body.result?.isError,
+  "read-only のトークンで書き込めてしまう");
 
 console.log(`mcp: ok (vault=${vault})`);

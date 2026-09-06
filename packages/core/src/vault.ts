@@ -64,23 +64,49 @@ export class VaultDO extends DurableObject<Env> {
     );
   }
 
+  /**
+   * デバイストークンのハッシュに使う salt。
+   *
+   * 当初は `ADMIN_SECRET` をそのまま使っていたが、それだと
+   * **秘密をローテーションすると全デバイストークンが無効になる**(§25.6)。
+   * Vault ごとに独立した salt を持ち、`ADMIN_SECRET` から切り離す。
+   */
+  private saltValue(): string {
+    const [row] = [...this.sql.exec<{ value: string }>(
+      "SELECT value FROM meta WHERE key = 'token_salt'"
+    )];
+    if (row) return row.value;
+    const salt = crypto.randomUUID().replaceAll("-", "");
+    this.sql.exec("INSERT INTO meta(key, value) VALUES ('token_salt', ?)", salt);
+    return salt;
+  }
+
   // --- 認証 -----------------------------------------------------------------
 
   async createDevice(name: string, scope: string, token: string): Promise<{ id: string }> {
     const id = crypto.randomUUID();
     this.sql.exec(
       `INSERT INTO devices(id, name, token_hash, scope, created_at) VALUES (?, ?, ?, ?, ?)`,
-      id, name, await tokenHash(this.env.ADMIN_SECRET, token), scope, Date.now()
+      id, name, await tokenHash(this.saltValue(), token), scope, Date.now()
     );
     return { id };
   }
 
   async authenticate(token: string): Promise<{ id: string; scope: string } | null> {
-    const hash = await tokenHash(this.env.ADMIN_SECRET, token);
-    const [row] = [...this.sql.exec<{ id: string; scope: string }>(
+    const find = (hash: string) => [...this.sql.exec<{ id: string; scope: string }>(
       "SELECT id, scope FROM devices WHERE token_hash = ? AND revoked_at IS NULL", hash
-    )];
-    return row ?? null;
+    )][0] ?? null;
+
+    const current = await tokenHash(this.saltValue(), token);
+    const row = find(current);
+    if (row) return row;
+
+    // 旧方式(salt = ADMIN_SECRET)で作られたトークンは、初めて使われたときに
+    // 新しい salt で入れ直す。利用者に再発行を強いずに移行する。
+    const legacy = find(await tokenHash(this.env.ADMIN_SECRET, token));
+    if (!legacy) return null;
+    this.sql.exec("UPDATE devices SET token_hash = ? WHERE id = ?", current, legacy.id);
+    return legacy;
   }
 
   async listDevices() {
@@ -377,6 +403,80 @@ export class VaultDO extends DurableObject<Env> {
       "SELECT DISTINCT src_path, dst_path, kind FROM links"
     )].filter((edge) => within.has(edge.src_path) && within.has(edge.dst_path));
     return { nodes, edges: edges.map((e) => ({ from: e.src_path, to: e.dst_path, kind: e.kind })) };
+  }
+
+  // --- 本文系(MCP 本文ツールの実体) ------------------------------------------------
+
+  async content(tool: string, args: Record<string, unknown>): Promise<unknown> {
+    switch (tool) {
+      case "read_note": {
+        const note = await this.readNote(String(args.path));
+        if (!note) throw new Error(`not found: ${args.path}`);
+        return note;
+      }
+      case "read_section":
+        return this.readSection(String(args.path), String(args.heading));
+      case "search":
+        return this.search(String(args.query), Number(args.limit ?? 20));
+      default:
+        throw new Error(`unknown tool: ${tool}`);
+    }
+  }
+
+  /** 見出しから次の同位以上の見出しまでを切り出す。長いノートを丸ごと読ませないため。 */
+  private readSection(path: string, heading: string) {
+    const [note] = [...this.sql.exec<{ body: string }>(
+      "SELECT body FROM notes WHERE path = ?", path
+    )];
+    if (!note) throw new Error(`not found: ${path}`);
+    const headings = [...this.sql.exec<{ level: number; text: string; line: number }>(
+      "SELECT level, text, line FROM headings WHERE path = ? ORDER BY line", path
+    )];
+    const index = headings.findIndex((h) => h.text === heading);
+    if (index === -1) {
+      throw new Error(`no heading "${heading}" in ${path}. available: ${headings.map((h) => h.text).join(", ")}`);
+    }
+    const start = headings[index];
+    const next = headings.slice(index + 1).find((h) => h.level <= start.level);
+    const lines = note.body.split("\n");
+    return {
+      path,
+      heading: start.text,
+      level: start.level,
+      text: lines.slice(start.line, next ? next.line : undefined).join("\n")
+    };
+  }
+
+  /**
+   * trigram は3文字未満を引けない(§10)。短い語は部分一致で拾う。
+   * FTS5 のクエリ構文を利用者の入力として解釈させないよう、フレーズとして囲う。
+   */
+  private search(query: string, limit: number) {
+    const capped = Math.max(1, Math.min(limit, 100));
+    if (query.trim().length < 3) {
+      return {
+        mode: "substring" as const,
+        matches: [...this.sql.exec(
+          `SELECT n.path AS path, n.title AS title FROM notes n
+           JOIN files f ON f.path = n.path AND f.deleted = 0
+           WHERE n.body LIKE ? ORDER BY n.path LIMIT ?`,
+          `%${query}%`, capped
+        )]
+      };
+    }
+    const phrase = `"${query.replaceAll('"', '""')}"`;
+    return {
+      mode: "index" as const,
+      matches: [...this.sql.exec(
+        `SELECT n.path AS path, n.title AS title,
+                snippet(notes_fts, 1, '<<', '>>', '…', 12) AS snippet
+         FROM notes_fts
+         JOIN notes n ON n.id = notes_fts.rowid
+         JOIN files f ON f.path = n.path AND f.deleted = 0
+         WHERE notes_fts MATCH ? ORDER BY bm25(notes_fts) LIMIT ?`,
+        phrase, capped
+      )]
+    };
   }
 
   // --- 通知 -----------------------------------------------------------------

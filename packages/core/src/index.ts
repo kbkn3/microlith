@@ -146,7 +146,8 @@ app.all("/vault/:vaultId/mcp", requireDevice, (c) => {
   if (!originAllowed(c.req.raw, allowedOriginsFrom(c.env.MCP_ALLOWED_ORIGINS))) {
     return c.json({ error: "origin not allowed" }, 403);
   }
-  return createVaultMcpHandler(c.get("vault")).fetch(c.req.raw);
+  return createVaultMcpHandler(c.get("vault"),
+    { canWrite: c.get("device").scope !== "mcp-read" }).fetch(c.req.raw);
 });
 
 app.get("/vault/:vaultId/ws", requireDevice, (c) =>

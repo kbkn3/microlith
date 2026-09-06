@@ -53,7 +53,7 @@ Compared to Obsidian Sync:
 wrangler.jsonc         Worker config (kept at the repo root for Deploy button compatibility)
 packages/core          石核 — Worker + Durable Object
 packages/blade         刃 — the Obsidian plugin
-packages/haft          柄 — MCP tool schemas shared by the remote and local servers
+packages/haft          柄 — shared definitions: MCP tool schemas and the rev hash
 ```
 
 ## Development
