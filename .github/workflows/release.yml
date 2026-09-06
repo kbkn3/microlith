@@ -1,0 +1,54 @@
+name: Release plugin
+
+# BRAT はリリース添付の manifest.json を読む。リポジトリルートに置く必要はない。
+# 代わりに **タグ・リリース名・manifest の version が一致していること**が要件で、
+# ここがずれていると利用者側で「インストールできない」としか見えない。CI で止める。
+on:
+  push:
+    tags: ["*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Check the tag matches the plugin version
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          version="$(node -p "require('./packages/blade/manifest.json').version")"
+          if [ "$tag" != "$version" ]; then
+            echo "Tag '$tag' does not match packages/blade/manifest.json version '$version'." >&2
+            echo "BRAT looks for a release whose tag equals the manifest version, so it would" >&2
+            echo "not find this one. Note that Obsidian tags carry no 'v' prefix." >&2
+            exit 1
+          fi
+
+      - run: npm run typecheck
+
+      - run: npm run build:blade
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd packages/blade
+          # styles.css は無ければ添付しない。BRAT は「あれば」使う。
+          # 変数を並べて渡すとシェルの分割規則に依存するので、引数を明示する。
+          if [ -f styles.css ]; then
+            gh release create "${GITHUB_REF_NAME}" manifest.json main.js styles.css \
+              --title "${GITHUB_REF_NAME}" --notes-file ../../.github/release-notes.md --prerelease
+          else
+            gh release create "${GITHUB_REF_NAME}" manifest.json main.js \
+              --title "${GITHUB_REF_NAME}" --notes-file ../../.github/release-notes.md --prerelease
+          fi

@@ -5,3 +5,6 @@ node_modules/
 main.js
 main.js.map
 .build.mjs
+
+# 設計記録はローカルのみ。事業面の検討を含むため公開しない
+microlith-handoff.md
