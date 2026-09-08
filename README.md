@@ -119,7 +119,7 @@ simulated devices against a real server without launching Obsidian.
 
 ### License
 
-Not chosen yet.
+Microlith is released under the [MIT License](LICENSE).
 
 ---
 
@@ -235,4 +235,4 @@ Obsidian を起動せず、実際のサーバーに対して2台の模擬端末�
 
 ### ライセンス
 
-未選択です。
+Microlith は [MIT License](LICENSE) の下で公開されています。
