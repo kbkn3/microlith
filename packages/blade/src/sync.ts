@@ -29,10 +29,25 @@ export interface StateStore {
 
 /** Obsidian Sync の既定に合わせて画像・音声・動画・PDF を外す(§5.6)。 */
 const EXCLUDED_EXTENSIONS = new Set([
-  "png", "jpg", "jpeg", "gif", "webp", "svg", "bmp", "avif",
-  "mp3", "wav", "m4a", "ogg", "flac", "3gp",
-  "mp4", "webm", "mov", "mkv",
-  "pdf"
+  "png",
+  "jpg",
+  "jpeg",
+  "gif",
+  "webp",
+  "svg",
+  "bmp",
+  "avif",
+  "mp3",
+  "wav",
+  "m4a",
+  "ogg",
+  "flac",
+  "3gp",
+  "mp4",
+  "webm",
+  "mov",
+  "mkv",
+  "pdf",
 ]);
 
 const MAX_ASSET_BYTES = 100 * 1024 * 1024;
@@ -61,7 +76,7 @@ export function conflictCopyPath(path: string, deviceName: string, at: Date): st
     String(at.getMonth() + 1).padStart(2, "0"),
     String(at.getDate()).padStart(2, "0"),
     String(at.getHours()).padStart(2, "0"),
-    String(at.getMinutes()).padStart(2, "0")
+    String(at.getMinutes()).padStart(2, "0"),
   ].join("");
   const dot = path.lastIndexOf(".");
   const [stem, extension] = dot === -1 ? [path, ""] : [path.slice(0, dot), path.slice(dot)];
@@ -76,7 +91,7 @@ export class SyncEngine {
     private readonly client: MicrolithClient,
     private readonly vault: VaultAdapter,
     private readonly state: StateStore,
-    private readonly options: SyncOptions
+    private readonly options: SyncOptions,
   ) {}
 
   isApplying(path: string): boolean {
@@ -110,7 +125,11 @@ export class SyncEngine {
 
     const body = await this.vault.read(path);
     const outcome = await this.client.pushNote({
-      path, baseRev, mtime, body, index: this.vault.indexOf(path) ?? undefined
+      path,
+      baseRev,
+      mtime,
+      body,
+      index: this.vault.indexOf(path) ?? undefined,
     });
     if (outcome.status === "conflict") return this.resolveNoteConflict(path, body, outcome);
     this.state.setRev(path, outcome.rev);
@@ -132,7 +151,7 @@ export class SyncEngine {
   private async resolveNoteConflict(
     path: string,
     localBody: string,
-    outcome: { rev: string; body: string | null }
+    outcome: { rev: string; body: string | null },
   ): Promise<void> {
     const copy = conflictCopyPath(path, this.options.deviceName, new Date());
     await this.applyRemote(path, async () => {
@@ -142,8 +161,11 @@ export class SyncEngine {
 
     await this.applyRemote(copy, async () => this.vault.write(copy, localBody));
     const pushed = await this.client.pushNote({
-      path: copy, baseRev: null, mtime: Date.now(), body: localBody,
-      index: this.vault.indexOf(copy) ?? undefined
+      path: copy,
+      baseRev: null,
+      mtime: Date.now(),
+      body: localBody,
+      index: this.vault.indexOf(copy) ?? undefined,
     });
     if (pushed.status !== "conflict") this.state.setRev(copy, pushed.rev);
     await this.state.save();
@@ -178,7 +200,7 @@ export class SyncEngine {
         this.notice("Server history was pruned; performing a full resync.");
         continue;
       }
-      for (const change of result.changes) applied += await this.applyChange(change) ? 1 : 0;
+      for (const change of result.changes) applied += (await this.applyChange(change)) ? 1 : 0;
       this.state.lastSeq = result.seq;
       if (!result.hasMore) break;
     }

@@ -1,55 +1,194 @@
 <!doctype html>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Microlith setup</title>
 <style>
   :root {
     color-scheme: light dark;
-    --bg: #fbfaf8; --panel: #ffffff; --ink: #1c1a17; --muted: #6b6560;
-    --line: #e2ded8; --accent: #7a5c3e; --danger: #9b3b2f; --ok: #2f6b46;
+    --bg: #fbfaf8;
+    --panel: #ffffff;
+    --ink: #1c1a17;
+    --muted: #6b6560;
+    --line: #e2ded8;
+    --accent: #7a5c3e;
+    --danger: #9b3b2f;
+    --ok: #2f6b46;
   }
   @media (prefers-color-scheme: dark) {
     :root {
-      --bg: #171614; --panel: #1f1e1b; --ink: #eceae6; --muted: #9a938c;
-      --line: #33302c; --accent: #c9a06d; --danger: #d97a6c; --ok: #7fc39a;
+      --bg: #171614;
+      --panel: #1f1e1b;
+      --ink: #eceae6;
+      --muted: #9a938c;
+      --line: #33302c;
+      --accent: #c9a06d;
+      --danger: #d97a6c;
+      --ok: #7fc39a;
     }
   }
-  * { box-sizing: border-box; }
+  * {
+    box-sizing: border-box;
+  }
   body {
-    margin: 0; padding: 2rem 1rem; background: var(--bg); color: var(--ink);
-    font: 15px/1.6 ui-sans-serif, system-ui, -apple-system, "Hiragino Sans", "Noto Sans JP", sans-serif;
+    margin: 0;
+    padding: 2rem 1rem;
+    background: var(--bg);
+    color: var(--ink);
+    font:
+      15px/1.6 ui-sans-serif,
+      system-ui,
+      -apple-system,
+      "Hiragino Sans",
+      "Noto Sans JP",
+      sans-serif;
   }
-  main { max-width: 46rem; margin: 0 auto; display: grid; gap: 1.5rem; }
-  h1 { font-size: 1.5rem; margin: 0; letter-spacing: -0.01em; }
-  h1 + p { margin: 0.25rem 0 0; color: var(--muted); }
-  h2 { font-size: 1rem; margin: 0 0 0.75rem; }
-  section { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 1.25rem; }
-  label { display: block; font-size: 0.85rem; color: var(--muted); margin-bottom: 0.3rem; }
-  input, select, button {
-    font: inherit; padding: 0.5rem 0.65rem; border-radius: 7px;
-    border: 1px solid var(--line); background: var(--bg); color: var(--ink);
+  main {
+    max-width: 46rem;
+    margin: 0 auto;
+    display: grid;
+    gap: 1.5rem;
   }
-  input, select { width: 100%; }
-  button { cursor: pointer; background: var(--accent); color: var(--bg); border-color: transparent; font-weight: 600; }
-  button.secondary { background: transparent; color: var(--ink); border-color: var(--line); font-weight: 400; }
-  button.danger { background: transparent; color: var(--danger); border-color: var(--line); font-weight: 400; }
-  button:hover { filter: brightness(1.08); }
-  .row { display: grid; gap: 0.75rem; grid-template-columns: 1fr auto; align-items: end; }
-  .fields { display: grid; gap: 0.75rem; grid-template-columns: 2fr 1fr auto; align-items: end; }
-  @media (max-width: 34rem) { .fields, .row { grid-template-columns: 1fr; } }
-  table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
-  th { text-align: left; font-weight: 600; color: var(--muted); font-size: 0.8rem; }
-  th, td { padding: 0.45rem 0.5rem 0.45rem 0; border-bottom: 1px solid var(--line); }
-  tr:last-child td { border-bottom: none; }
-  .stats { display: grid; gap: 0.75rem 1.5rem; grid-template-columns: repeat(auto-fit, minmax(7rem, 1fr)); }
-  .stat b { display: block; font-size: 1.25rem; font-variant-numeric: tabular-nums; font-weight: 600; }
-  .stat span { color: var(--muted); font-size: 0.8rem; }
-  code, .token { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.85rem; }
-  .token { display: block; padding: 0.65rem; background: var(--bg); border: 1px dashed var(--accent); border-radius: 7px; word-break: break-all; margin: 0.5rem 0; }
-  .note { color: var(--muted); font-size: 0.85rem; margin: 0.5rem 0 0; }
-  .error { color: var(--danger); }
-  .ok { color: var(--ok); }
-  [hidden] { display: none !important; }
+  h1 {
+    font-size: 1.5rem;
+    margin: 0;
+    letter-spacing: -0.01em;
+  }
+  h1 + p {
+    margin: 0.25rem 0 0;
+    color: var(--muted);
+  }
+  h2 {
+    font-size: 1rem;
+    margin: 0 0 0.75rem;
+  }
+  section {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 1.25rem;
+  }
+  label {
+    display: block;
+    font-size: 0.85rem;
+    color: var(--muted);
+    margin-bottom: 0.3rem;
+  }
+  input,
+  select,
+  button {
+    font: inherit;
+    padding: 0.5rem 0.65rem;
+    border-radius: 7px;
+    border: 1px solid var(--line);
+    background: var(--bg);
+    color: var(--ink);
+  }
+  input,
+  select {
+    width: 100%;
+  }
+  button {
+    cursor: pointer;
+    background: var(--accent);
+    color: var(--bg);
+    border-color: transparent;
+    font-weight: 600;
+  }
+  button.secondary {
+    background: transparent;
+    color: var(--ink);
+    border-color: var(--line);
+    font-weight: 400;
+  }
+  button.danger {
+    background: transparent;
+    color: var(--danger);
+    border-color: var(--line);
+    font-weight: 400;
+  }
+  button:hover {
+    filter: brightness(1.08);
+  }
+  .row {
+    display: grid;
+    gap: 0.75rem;
+    grid-template-columns: 1fr auto;
+    align-items: end;
+  }
+  .fields {
+    display: grid;
+    gap: 0.75rem;
+    grid-template-columns: 2fr 1fr auto;
+    align-items: end;
+  }
+  @media (max-width: 34rem) {
+    .fields,
+    .row {
+      grid-template-columns: 1fr;
+    }
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.9rem;
+  }
+  th {
+    text-align: left;
+    font-weight: 600;
+    color: var(--muted);
+    font-size: 0.8rem;
+  }
+  th,
+  td {
+    padding: 0.45rem 0.5rem 0.45rem 0;
+    border-bottom: 1px solid var(--line);
+  }
+  tr:last-child td {
+    border-bottom: none;
+  }
+  .stats {
+    display: grid;
+    gap: 0.75rem 1.5rem;
+    grid-template-columns: repeat(auto-fit, minmax(7rem, 1fr));
+  }
+  .stat b {
+    display: block;
+    font-size: 1.25rem;
+    font-variant-numeric: tabular-nums;
+    font-weight: 600;
+  }
+  .stat span {
+    color: var(--muted);
+    font-size: 0.8rem;
+  }
+  code,
+  .token {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.85rem;
+  }
+  .token {
+    display: block;
+    padding: 0.65rem;
+    background: var(--bg);
+    border: 1px dashed var(--accent);
+    border-radius: 7px;
+    word-break: break-all;
+    margin: 0.5rem 0;
+  }
+  .note {
+    color: var(--muted);
+    font-size: 0.85rem;
+    margin: 0.5rem 0 0;
+  }
+  .error {
+    color: var(--danger);
+  }
+  .ok {
+    color: var(--ok);
+  }
+  [hidden] {
+    display: none !important;
+  }
 </style>
 
 <main>
@@ -63,12 +202,16 @@
     <div class="fields">
       <div>
         <label for="secret">Admin secret</label>
-        <input id="secret" type="password" autocomplete="off"
-               placeholder="the ADMIN_SECRET you set when deploying">
+        <input
+          id="secret"
+          type="password"
+          autocomplete="off"
+          placeholder="the ADMIN_SECRET you set when deploying"
+        />
       </div>
       <div>
         <label for="vault">Vault ID</label>
-        <input id="vault" list="known-vaults" value="default">
+        <input id="vault" list="known-vaults" value="default" />
         <datalist id="known-vaults"></datalist>
       </div>
       <button id="connect">Connect</button>
@@ -87,14 +230,19 @@
     <h2>Devices</h2>
     <table>
       <thead>
-        <tr><th>Name</th><th>Scope</th><th>Synced to</th><th></th></tr>
+        <tr>
+          <th>Name</th>
+          <th>Scope</th>
+          <th>Synced to</th>
+          <th></th>
+        </tr>
       </thead>
       <tbody id="devices"></tbody>
     </table>
     <div class="fields" style="margin-top: 1rem">
       <div>
         <label for="device-name">New device name</label>
-        <input id="device-name" placeholder="laptop">
+        <input id="device-name" placeholder="laptop" />
       </div>
       <div>
         <label for="device-scope">Scope</label>
@@ -107,7 +255,9 @@
       <button id="issue">Issue token</button>
     </div>
     <div id="issued" hidden>
-      <p class="note">Copy this now. It is not shown again, and the server only keeps a hash of it.</p>
+      <p class="note">
+        Copy this now. It is not shown again, and the server only keeps a hash of it.
+      </p>
       <code class="token" id="issued-token"></code>
       <button class="secondary" id="copy">Copy</button>
     </div>
@@ -117,11 +267,18 @@
     <h2>Connected apps</h2>
     <p class="note">
       Each authorization is tied to one vault. If an app sees an empty vault, check that it is
-      pointed at the one holding your notes. An app you just connected can take a moment to
-      appear here.
+      pointed at the one holding your notes. An app you just connected can take a moment to appear
+      here.
     </p>
     <table>
-      <thead><tr><th>App</th><th>Vault</th><th>Access</th><th></th></tr></thead>
+      <thead>
+        <tr>
+          <th>App</th>
+          <th>Vault</th>
+          <th>Access</th>
+          <th></th>
+        </tr>
+      </thead>
       <tbody id="grants"></tbody>
     </table>
   </section>
@@ -130,217 +287,245 @@
     <h2>Deleted files</h2>
     <p class="note">Kept for 30 days, then removed for good.</p>
     <table>
-      <thead><tr><th>Path</th><th>Deleted</th><th></th></tr></thead>
+      <thead>
+        <tr>
+          <th>Path</th>
+          <th>Deleted</th>
+          <th></th>
+        </tr>
+      </thead>
       <tbody id="deleted"></tbody>
     </table>
   </section>
 </main>
 
 <script>
-const $ = (id) => document.getElementById(id);
-const state = { secret: sessionStorage.getItem("microlith.secret") ?? "", vault: "default" };
+  const $ = (id) => document.getElementById(id);
+  const state = { secret: sessionStorage.getItem("microlith.secret") ?? "", vault: "default" };
 
-const note = (message, kind = "") => {
-  const element = $("connection-note");
-  element.textContent = message;
-  element.className = `note ${kind}`;
-};
+  const note = (message, kind = "") => {
+    const element = $("connection-note");
+    element.textContent = message;
+    element.className = `note ${kind}`;
+  };
 
-async function api(action, options = {}) {
-  const url = new URL(`/vault/${encodeURIComponent(state.vault)}/${action}`, location.origin);
-  for (const [key, value] of Object.entries(options.query ?? {})) url.searchParams.set(key, value);
-  const response = await fetch(url, {
-    method: options.method ?? "GET",
-    // シークレットはヘッダで送る。クエリ文字列に置くとアクセスログに残る。
-    headers: {
-      Authorization: `Bearer ${state.secret}`,
-      ...(options.body ? { "content-type": "application/json" } : {})
-    },
-    body: options.body ? JSON.stringify(options.body) : undefined
-  });
-  if (!response.ok) throw new Error(`${response.status} ${await response.text()}`);
-  return response.json();
-}
-
-async function apiRoot(action, options = {}) {
-  const url = new URL(`/${action}`, location.origin);
-  for (const [key, value] of Object.entries(options.query ?? {})) url.searchParams.set(key, value);
-  const response = await fetch(url, {
-    method: options.method ?? "GET",
-    headers: { Authorization: `Bearer ${state.secret}` }
-  });
-  if (!response.ok) throw new Error(`${response.status} ${await response.text()}`);
-  return response.json();
-}
-
-const rememberVault = (vault) => {
-  const known = new Set(JSON.parse(localStorage.getItem("microlith.vaults") ?? "[]"));
-  known.add(vault);
-  localStorage.setItem("microlith.vaults", JSON.stringify([...known]));
-  localStorage.setItem("microlith.lastVault", vault);
-  renderKnownVaults();
-};
-
-const renderKnownVaults = (fromServer = []) => {
-  const known = [...new Set([
-    ...JSON.parse(localStorage.getItem("microlith.vaults") ?? "[]"),
-    ...fromServer
-  ])].sort();
-  $("known-vaults").innerHTML = "";
-  for (const vault of known) {
-    const option = document.createElement("option");
-    option.value = vault;
-    $("known-vaults").append(option);
+  async function api(action, options = {}) {
+    const url = new URL(`/vault/${encodeURIComponent(state.vault)}/${action}`, location.origin);
+    for (const [key, value] of Object.entries(options.query ?? {}))
+      url.searchParams.set(key, value);
+    const response = await fetch(url, {
+      method: options.method ?? "GET",
+      // シークレットはヘッダで送る。クエリ文字列に置くとアクセスログに残る。
+      headers: {
+        Authorization: `Bearer ${state.secret}`,
+        ...(options.body ? { "content-type": "application/json" } : {}),
+      },
+      body: options.body ? JSON.stringify(options.body) : undefined,
+    });
+    if (!response.ok) throw new Error(`${response.status} ${await response.text()}`);
+    return response.json();
   }
-};
 
-const bytes = (value) => value < 1024 * 1024
-  ? `${Math.round(value / 1024)} KB`
-  : `${(value / 1024 / 1024).toFixed(1)} MB`;
+  async function apiRoot(action, options = {}) {
+    const url = new URL(`/${action}`, location.origin);
+    for (const [key, value] of Object.entries(options.query ?? {}))
+      url.searchParams.set(key, value);
+    const response = await fetch(url, {
+      method: options.method ?? "GET",
+      headers: { Authorization: `Bearer ${state.secret}` },
+    });
+    if (!response.ok) throw new Error(`${response.status} ${await response.text()}`);
+    return response.json();
+  }
 
-const stat = (label, value, kind = "") => {
-  const cell = document.createElement("div");
-  cell.className = "stat";
-  const strong = document.createElement("b");
-  strong.textContent = value;
-  if (kind) strong.className = kind;
-  const span = document.createElement("span");
-  span.textContent = label;
-  cell.append(strong, span);
-  return cell;
-};
+  const rememberVault = (vault) => {
+    const known = new Set(JSON.parse(localStorage.getItem("microlith.vaults") ?? "[]"));
+    known.add(vault);
+    localStorage.setItem("microlith.vaults", JSON.stringify([...known]));
+    localStorage.setItem("microlith.lastVault", vault);
+    renderKnownVaults();
+  };
 
-async function refresh() {
-  // 4つとも独立なので直列にすると往復が積み上がる。DO と KV への往復が実測を支配する。
-  const [status, deviceList, grantList, deletedList] = await Promise.all([
-    api("status"), api("devices"), apiRoot("grants"), api("deleted")
-  ]);
-
-  $("stats").replaceChildren(
-    stat("files", String(status.files)),
-    stat("revision", String(status.seq)),
-    stat("connected now", String(status.connectedDevices)),
-    stat("database", bytes(status.databaseSize)),
-    stat("search index", status.ftsIntegrity === "ok" ? "healthy" : "damaged",
-         status.ftsIntegrity === "ok" ? "ok" : "error")
-  );
-
-  const { devices } = deviceList;
-  $("devices").replaceChildren(...devices.map((device) => {
-    const row = document.createElement("tr");
-    for (const text of [device.name, device.scope, `revision ${device.last_seen_seq}`]) {
-      const cell = document.createElement("td");
-      cell.textContent = text;
-      row.append(cell);
+  const renderKnownVaults = (fromServer = []) => {
+    const known = [
+      ...new Set([...JSON.parse(localStorage.getItem("microlith.vaults") ?? "[]"), ...fromServer]),
+    ].sort();
+    $("known-vaults").innerHTML = "";
+    for (const vault of known) {
+      const option = document.createElement("option");
+      option.value = vault;
+      $("known-vaults").append(option);
     }
-    const actions = document.createElement("td");
-    const revoke = document.createElement("button");
-    revoke.className = "danger";
-    revoke.textContent = "Revoke";
-    revoke.onclick = async () => {
-      if (!confirm(`Revoke the token for ${device.name}? That device will stop syncing.`)) return;
-      await api("devices", { method: "DELETE", query: { id: device.id } });
+  };
+
+  const bytes = (value) =>
+    value < 1024 * 1024
+      ? `${Math.round(value / 1024)} KB`
+      : `${(value / 1024 / 1024).toFixed(1)} MB`;
+
+  const stat = (label, value, kind = "") => {
+    const cell = document.createElement("div");
+    cell.className = "stat";
+    const strong = document.createElement("b");
+    strong.textContent = value;
+    if (kind) strong.className = kind;
+    const span = document.createElement("span");
+    span.textContent = label;
+    cell.append(strong, span);
+    return cell;
+  };
+
+  async function refresh() {
+    // 4つとも独立なので直列にすると往復が積み上がる。DO と KV への往復が実測を支配する。
+    const [status, deviceList, grantList, deletedList] = await Promise.all([
+      api("status"),
+      api("devices"),
+      apiRoot("grants"),
+      api("deleted"),
+    ]);
+
+    $("stats").replaceChildren(
+      stat("files", String(status.files)),
+      stat("revision", String(status.seq)),
+      stat("connected now", String(status.connectedDevices)),
+      stat("database", bytes(status.databaseSize)),
+      stat(
+        "search index",
+        status.ftsIntegrity === "ok" ? "healthy" : "damaged",
+        status.ftsIntegrity === "ok" ? "ok" : "error",
+      ),
+    );
+
+    const { devices } = deviceList;
+    $("devices").replaceChildren(
+      ...devices.map((device) => {
+        const row = document.createElement("tr");
+        for (const text of [device.name, device.scope, `revision ${device.last_seen_seq}`]) {
+          const cell = document.createElement("td");
+          cell.textContent = text;
+          row.append(cell);
+        }
+        const actions = document.createElement("td");
+        const revoke = document.createElement("button");
+        revoke.className = "danger";
+        revoke.textContent = "Revoke";
+        revoke.onclick = async () => {
+          if (!confirm(`Revoke the token for ${device.name}? That device will stop syncing.`))
+            return;
+          await api("devices", { method: "DELETE", query: { id: device.id } });
+          await refresh();
+        };
+        actions.append(revoke);
+        row.append(actions);
+        return row;
+      }),
+    );
+
+    const { grants } = grantList;
+    $("grants-panel").hidden = false;
+    $("grants").replaceChildren(
+      ...grants.map((grant) => {
+        const row = document.createElement("tr");
+        for (const text of [
+          grant.clientName,
+          grant.vaultId ?? "(unknown)",
+          grant.scope.join(", "),
+        ]) {
+          const cell = document.createElement("td");
+          cell.textContent = text;
+          // 見ている Vault と違うものに紐づいた認可は、空の結果の原因になりやすい
+          if (text === grant.vaultId && grant.vaultId !== state.vault) cell.className = "error";
+          row.append(cell);
+        }
+        const actions = document.createElement("td");
+        const revoke = document.createElement("button");
+        revoke.className = "danger";
+        revoke.textContent = "Revoke";
+        revoke.onclick = async () => {
+          if (!confirm(`Revoke ${grant.clientName}? It will have to authorize again.`)) return;
+          await apiRoot("grants", { method: "DELETE", query: { id: grant.id } });
+          await refresh();
+        };
+        actions.append(revoke);
+        row.append(actions);
+        return row;
+      }),
+    );
+
+    const { files } = deletedList;
+    $("deleted-panel").hidden = false;
+    $("deleted").replaceChildren(
+      ...files.map((file) => {
+        const row = document.createElement("tr");
+        const path = document.createElement("td");
+        path.textContent = file.path;
+        const when = document.createElement("td");
+        when.textContent = new Date(file.deleted_at).toLocaleString();
+        const actions = document.createElement("td");
+        if (file.kind === "note") {
+          const restore = document.createElement("button");
+          restore.className = "secondary";
+          restore.textContent = "Restore";
+          restore.onclick = async () => {
+            await api("restore", { method: "POST", query: { path: file.path } });
+            await refresh();
+          };
+          actions.append(restore);
+        }
+        row.append(path, when, actions);
+        return row;
+      }),
+    );
+  }
+
+  $("connect").onclick = async () => {
+    state.secret = $("secret").value.trim();
+    state.vault = $("vault").value.trim() || "default";
+    try {
+      // 一覧が引けなくても本体の操作は続けられるので、refresh と並べて先に投げる
+      const vaultList = apiRoot("vaults").catch(() => null);
       await refresh();
-    };
-    actions.append(revoke);
-    row.append(actions);
-    return row;
-  }));
-
-  const { grants } = grantList;
-  $("grants-panel").hidden = false;
-  $("grants").replaceChildren(...grants.map((grant) => {
-    const row = document.createElement("tr");
-    for (const text of [grant.clientName, grant.vaultId ?? "(unknown)", grant.scope.join(", ")]) {
-      const cell = document.createElement("td");
-      cell.textContent = text;
-      // 見ている Vault と違うものに紐づいた認可は、空の結果の原因になりやすい
-      if (text === grant.vaultId && grant.vaultId !== state.vault) cell.className = "error";
-      row.append(cell);
+      const listed = await vaultList;
+      if (listed) renderKnownVaults(listed.vaults);
+      sessionStorage.setItem("microlith.secret", state.secret);
+      rememberVault(state.vault);
+      $("status-panel").hidden = false;
+      $("devices-panel").hidden = false;
+      note(`Connected to ${state.vault}.`, "ok");
+    } catch (error) {
+      $("status-panel").hidden = true;
+      $("devices-panel").hidden = true;
+      $("grants-panel").hidden = true;
+      $("deleted-panel").hidden = true;
+      note(
+        String(error).includes("401")
+          ? "That admin secret was not accepted."
+          : `Could not reach the vault. ${error}`,
+        "error",
+      );
     }
-    const actions = document.createElement("td");
-    const revoke = document.createElement("button");
-    revoke.className = "danger";
-    revoke.textContent = "Revoke";
-    revoke.onclick = async () => {
-      if (!confirm(`Revoke ${grant.clientName}? It will have to authorize again.`)) return;
-      await apiRoot("grants", { method: "DELETE", query: { id: grant.id } });
-      await refresh();
-    };
-    actions.append(revoke);
-    row.append(actions);
-    return row;
-  }));
+  };
 
-  const { files } = deletedList;
-  $("deleted-panel").hidden = false;
-  $("deleted").replaceChildren(...files.map((file) => {
-    const row = document.createElement("tr");
-    const path = document.createElement("td");
-    path.textContent = file.path;
-    const when = document.createElement("td");
-    when.textContent = new Date(file.deleted_at).toLocaleString();
-    const actions = document.createElement("td");
-    if (file.kind === "note") {
-      const restore = document.createElement("button");
-      restore.className = "secondary";
-      restore.textContent = "Restore";
-      restore.onclick = async () => {
-        await api("restore", { method: "POST", query: { path: file.path } });
-        await refresh();
-      };
-      actions.append(restore);
-    }
-    row.append(path, when, actions);
-    return row;
-  }));
-}
-
-$("connect").onclick = async () => {
-  state.secret = $("secret").value.trim();
-  state.vault = $("vault").value.trim() || "default";
-  try {
-    // 一覧が引けなくても本体の操作は続けられるので、refresh と並べて先に投げる
-    const vaultList = apiRoot("vaults").catch(() => null);
+  $("issue").onclick = async () => {
+    const name = $("device-name").value.trim();
+    if (!name) return note("Give the device a name so you can tell tokens apart.", "error");
+    const issued = await api("devices", {
+      method: "POST",
+      body: { name, scope: $("device-scope").value },
+    });
+    $("issued-token").textContent = issued.token;
+    $("issued").hidden = false;
+    $("device-name").value = "";
     await refresh();
-    const listed = await vaultList;
-    if (listed) renderKnownVaults(listed.vaults);
-    sessionStorage.setItem("microlith.secret", state.secret);
-    rememberVault(state.vault);
-    $("status-panel").hidden = false;
-    $("devices-panel").hidden = false;
-    note(`Connected to ${state.vault}.`, "ok");
-  } catch (error) {
-    $("status-panel").hidden = true;
-    $("devices-panel").hidden = true;
-    $("grants-panel").hidden = true;
-    $("deleted-panel").hidden = true;
-    note(String(error).includes("401")
-      ? "That admin secret was not accepted."
-      : `Could not reach the vault. ${error}`, "error");
-  }
-};
+  };
 
-$("issue").onclick = async () => {
-  const name = $("device-name").value.trim();
-  if (!name) return note("Give the device a name so you can tell tokens apart.", "error");
-  const issued = await api("devices", {
-    method: "POST",
-    body: { name, scope: $("device-scope").value }
-  });
-  $("issued-token").textContent = issued.token;
-  $("issued").hidden = false;
-  $("device-name").value = "";
-  await refresh();
-};
+  $("copy").onclick = async () => {
+    await navigator.clipboard.writeText($("issued-token").textContent);
+    $("copy").textContent = "Copied";
+    setTimeout(() => ($("copy").textContent = "Copy"), 1500);
+  };
 
-$("copy").onclick = async () => {
-  await navigator.clipboard.writeText($("issued-token").textContent);
-  $("copy").textContent = "Copied";
-  setTimeout(() => ($("copy").textContent = "Copy"), 1500);
-};
-
-renderKnownVaults();
-if (state.secret) $("secret").value = state.secret;
-$("vault").value = localStorage.getItem("microlith.lastVault") ?? "default";
+  renderKnownVaults();
+  if (state.secret) $("secret").value = state.secret;
+  $("vault").value = localStorage.getItem("microlith.lastVault") ?? "default";
 </script>

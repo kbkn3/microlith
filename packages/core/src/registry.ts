@@ -23,9 +23,7 @@ export async function knownVaults(environment: Env): Promise<string[]> {
 
   // 既存環境の Vault を選択肢から消さないため、単一キーの初回作成時だけ旧形式を読む。
   const listing = await environment.OAUTH_KV.list({ prefix: LEGACY_VAULT_PREFIX, limit: 1000 });
-  const migrated = listing.keys
-    .map((key) => key.name.slice(LEGACY_VAULT_PREFIX.length))
-    .sort();
+  const migrated = listing.keys.map((key) => key.name.slice(LEGACY_VAULT_PREFIX.length)).sort();
   await environment.OAUTH_KV.put(VAULTS_KEY, JSON.stringify(migrated));
   return migrated;
 }
@@ -41,6 +39,6 @@ export async function forgetVault(environment: Env, vaultId: string): Promise<vo
   if (!known.includes(vaultId)) return;
   await environment.OAUTH_KV.put(
     VAULTS_KEY,
-    JSON.stringify(known.filter((name) => name !== vaultId))
+    JSON.stringify(known.filter((name) => name !== vaultId)),
   );
 }

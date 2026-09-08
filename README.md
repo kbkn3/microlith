@@ -74,14 +74,14 @@ one Self-hosted LiveSync and Remotely Save make, and it is deliberate.
 
 Compared to Obsidian Sync:
 
-| | Obsidian Sync | Microlith |
-|---|---|---|
-| Conflicts | merge by default, or conflict file | conflict file only (merge planned) |
-| Version history | notes 1 month, attachments 2 weeks | not yet, planned |
-| Deleted file recovery | yes | yes, 30 days |
-| Images / audio / video / PDF | excluded by default | same |
-| Max file size | 5 MB / 200 MB by plan | 100 MB |
-| Vault config (`.obsidian`) | synced | not yet |
+|                              | Obsidian Sync                      | Microlith                          |
+| ---------------------------- | ---------------------------------- | ---------------------------------- |
+| Conflicts                    | merge by default, or conflict file | conflict file only (merge planned) |
+| Version history              | notes 1 month, attachments 2 weeks | not yet, planned                   |
+| Deleted file recovery        | yes                                | yes, 30 days                       |
+| Images / audio / video / PDF | excluded by default                | same                               |
+| Max file size                | 5 MB / 200 MB by plan              | 100 MB                             |
+| Vault config (`.obsidian`)   | synced                             | not yet                            |
 
 ### Layout
 
@@ -97,6 +97,7 @@ packages/haft          handle — shared MCP tool schemas and the revision hash
 ```
 npm install
 npm run dev
+npm run check          # lint, formatting, secrets, types, and standalone tests
 npm run typecheck
 npm run smoke          # sync API, requires `npm run dev` in another terminal
 npm run test:mcp       # MCP endpoint against a running dev server
@@ -190,14 +191,14 @@ Microlith は**平文・セルフホスト専用**です。E2E 暗号化モー�
 
 Obsidian Sync との比較：
 
-| | Obsidian Sync | Microlith |
-|---|---|---|
-| 競合 | 既定ではマージ、または競合ファイル | 競合ファイルのみ（マージは予定） |
-| バージョン履歴 | ノート1か月、添付2週間 | 未実装、対応予定 |
-| 削除ファイルの復元 | 対応 | 対応、30日間 |
-| 画像・音声・動画・PDF | 既定で除外 | 同じ |
-| ファイルサイズ上限 | プランにより 5 MB / 200 MB | 100 MB |
-| Vault 設定（`.obsidian`） | 同期対象 | 未対応 |
+|                           | Obsidian Sync                      | Microlith                        |
+| ------------------------- | ---------------------------------- | -------------------------------- |
+| 競合                      | 既定ではマージ、または競合ファイル | 競合ファイルのみ（マージは予定） |
+| バージョン履歴            | ノート1か月、添付2週間             | 未実装、対応予定                 |
+| 削除ファイルの復元        | 対応                               | 対応、30日間                     |
+| 画像・音声・動画・PDF     | 既定で除外                         | 同じ                             |
+| ファイルサイズ上限        | プランにより 5 MB / 200 MB         | 100 MB                           |
+| Vault 設定（`.obsidian`） | 同期対象                           | 未対応                           |
 
 ### 構成
 
@@ -213,6 +214,7 @@ packages/haft          柄 — MCP ツールスキーマと revision hash の共
 ```
 npm install
 npm run dev
+npm run check          # lint・format・secret・型・単体テストをまとめて検証
 npm run typecheck
 npm run smoke          # 同期 API。別のターミナルで `npm run dev` が必要
 npm run test:mcp       # 起動中の開発サーバーに対する MCP エンドポイントのテスト

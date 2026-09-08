@@ -12,7 +12,7 @@ export class PluginState implements StateStore {
 
   constructor(
     persisted: PersistedState | null,
-    private readonly persist: (state: PersistedState) => Promise<void>
+    private readonly persist: (state: PersistedState) => Promise<void>,
   ) {
     this.lastSeq = persisted?.lastSeq ?? 0;
     this.revs = new Map(Object.entries(persisted?.revs ?? {}));

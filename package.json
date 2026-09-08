@@ -1,32 +1,43 @@
 {
   "name": "microlith",
   "version": "0.1.0",
-  "license": "MIT",
   "private": true,
+  "license": "MIT",
   "workspaces": [
     "packages/*"
   ],
-  "allowScripts": {
-    "esbuild@0.28.1": true,
-    "esbuild@0.28.2": true,
-    "fsevents@2.3.3": true,
-    "workerd@1.20260820.1": true
-  },
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
+    "lint": "oxlint --vitest-plugin --deny-warnings .",
+    "lint:fix": "oxlint --vitest-plugin --deny-warnings --fix .",
+    "format": "oxfmt .",
+    "format:check": "oxfmt --check .",
+    "secretlint": "secretlint \"**/*\"",
     "typecheck": "tsc --noEmit && tsc --noEmit -p packages/blade",
-    "smoke": "node packages/core/test/smoke.mjs",
+    "check": "npm run lint && npm run format:check && npm run secretlint && npm run typecheck && npm test",
+    "test": "npm run test:registry",
+    "smoke": "vitest run --testTimeout 30000 packages/core/test/smoke.test.mjs",
     "build:blade": "npm run build --workspace @microlith/blade",
-    "test:blade": "esbuild packages/blade/test/sync.test.mjs --bundle --platform=node --format=esm --outfile=packages/blade/test/.build.mjs --log-level=warning && node packages/blade/test/.build.mjs",
-    "test:mcp": "node packages/core/test/mcp.test.mjs",
-    "test:oauth": "node packages/core/test/oauth.test.mjs",
-    "test:registry": "esbuild packages/core/test/registry.test.mjs --bundle --platform=node --format=esm --outfile=packages/core/test/.build.mjs --log-level=warning && node packages/core/test/.build.mjs"
+    "test:blade": "vitest run --testTimeout 30000 packages/blade/test/sync.test.mjs",
+    "test:mcp": "vitest run --testTimeout 30000 packages/core/test/mcp.test.mjs",
+    "test:oauth": "vitest run --testTimeout 30000 packages/core/test/oauth.test.mjs",
+    "test:registry": "vitest run packages/core/test/registry.test.mjs"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "5.20260825.1",
+    "@secretlint/secretlint-rule-preset-recommend": "13.0.5",
+    "oxfmt": "0.65.0",
+    "oxlint": "1.80.0",
+    "secretlint": "13.0.5",
     "typescript": "^5.9.2",
+    "vitest": "4.1.11",
     "wrangler": "4.125.0"
+  },
+  "allowScripts": {
+    "esbuild@0.28.1": true,
+    "fsevents@2.3.3": true,
+    "workerd@1.20260820.1": true
   },
   "cloudflare": {
     "bindings": {

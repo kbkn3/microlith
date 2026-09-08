@@ -1,17 +1,17 @@
 {
   "name": "@microlith/blade",
   "version": "0.1.0",
-  "license": "MIT",
   "private": true,
+  "license": "MIT",
   "type": "module",
   "scripts": {
-    "build": "node esbuild.config.mjs"
+    "build": "node rolldown.config.mjs"
   },
   "dependencies": {
     "@microlith/haft": "*"
   },
   "devDependencies": {
-    "esbuild": "0.28.2",
-    "obsidian": "1.13.1"
+    "obsidian": "1.13.1",
+    "rolldown": "1.2.6"
   }
 }

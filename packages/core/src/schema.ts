@@ -19,5 +19,5 @@ export const SCHEMA = [
      path TEXT, level INTEGER, text TEXT, line INTEGER, parent_line INTEGER)`,
   `CREATE TABLE IF NOT EXISTS devices(
      id TEXT PRIMARY KEY, name TEXT NOT NULL, token_hash TEXT NOT NULL, scope TEXT NOT NULL,
-     last_seen_seq INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL, revoked_at INTEGER)`
+     last_seen_seq INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL, revoked_at INTEGER)`,
 ] as const;

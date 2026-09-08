@@ -1,4 +1,13 @@
-import { App, Notice, Plugin, PluginSettingTab, Setting, TFile, debounce, requestUrl } from "obsidian";
+import {
+  App,
+  Notice,
+  Plugin,
+  PluginSettingTab,
+  Setting,
+  TFile,
+  debounce,
+  requestUrl,
+} from "obsidian";
 import { MicrolithClient, type HttpClient, type NoteIndex } from "./client";
 import { SyncEngine, type VaultAdapter } from "./sync";
 import { PluginState, type PersistedState } from "./state";
@@ -18,7 +27,7 @@ const DEFAULT_CONFIGURATION: Configuration = {
   vaultId: "default",
   token: "",
   deviceName: "device",
-  syncAllFileTypes: false
+  syncAllFileTypes: false,
 };
 
 /** 再接続の間隔。落ちたサーバに詰め寄らないよう指数的に伸ばす。 */
@@ -36,7 +45,7 @@ const obsidianHttp: HttpClient = async (url, init) => {
     method: init.method ?? "GET",
     headers: init.headers,
     body: init.body,
-    throw: false
+    throw: false,
   });
   return {
     ok: response.status >= 200 && response.status < 300,
@@ -44,7 +53,9 @@ const obsidianHttp: HttpClient = async (url, init) => {
     text: async () => response.text,
     json: async () => response.json,
     arrayBuffer: async () => response.arrayBuffer,
-    headers: { get: (name) => response.headers[name] ?? response.headers[name.toLowerCase()] ?? null }
+    headers: {
+      get: (name) => response.headers[name] ?? response.headers[name.toLowerCase()] ?? null,
+    },
   };
 };
 
@@ -63,7 +74,7 @@ export default class MicrolithPlugin extends Plugin {
     this.addCommand({
       id: "sync-now",
       name: "Sync now",
-      callback: () => void this.syncNow()
+      callback: () => void this.syncNow(),
     });
 
     // Vault のイベントは起動時のインデックス構築でも大量に飛ぶ。
@@ -86,12 +97,15 @@ export default class MicrolithPlugin extends Plugin {
       await this.saveData({ ...this.configuration, state: next });
     });
     const client = new MicrolithClient(
-      this.configuration.endpoint, this.configuration.vaultId, this.configuration.token, obsidianHttp
+      this.configuration.endpoint,
+      this.configuration.vaultId,
+      this.configuration.token,
+      obsidianHttp,
     );
     this.engine = new SyncEngine(client, this.adapter(), state, {
       deviceName: this.configuration.deviceName,
       syncAllFileTypes: this.configuration.syncAllFileTypes,
-      onNotice: (message) => new Notice(`Microlith: ${message}`)
+      onNotice: (message) => new Notice(`Microlith: ${message}`),
     });
 
     this.registerVaultEvents();
@@ -104,12 +118,14 @@ export default class MicrolithPlugin extends Plugin {
     this.registerEvent(this.app.vault.on("modify", (file) => push(file.path)));
     this.registerEvent(this.app.vault.on("create", (file) => push(file.path)));
     this.registerEvent(this.app.vault.on("delete", (file) => push(file.path)));
-    this.registerEvent(this.app.vault.on("rename", (file, oldPath) => {
-      // rename は「旧 path の削除 + 新 path の作成」として送る。
-      // サーバ側に rename の概念を持ち込むと、競合の場合分けが一気に増える。
-      push(oldPath);
-      push(file.path);
-    }));
+    this.registerEvent(
+      this.app.vault.on("rename", (file, oldPath) => {
+        // rename は「旧 path の削除 + 新 path の作成」として送る。
+        // サーバ側に rename の概念を持ち込むと、競合の場合分けが一気に増える。
+        push(oldPath);
+        push(file.path);
+      }),
+    );
   }
 
   private connect(client: MicrolithClient): void {
@@ -207,31 +223,38 @@ export default class MicrolithPlugin extends Plugin {
         const index: NoteIndex = {
           links: [
             ...(cache.links ?? []).map((link) => ({
-              dst: metadataCache.getFirstLinkpathDest(link.link.split("#")[0], path)?.path ?? link.link,
-              kind: "wikilink"
+              dst:
+                metadataCache.getFirstLinkpathDest(link.link.split("#")[0], path)?.path ??
+                link.link,
+              kind: "wikilink",
             })),
             ...(cache.embeds ?? []).map((embed) => ({
-              dst: metadataCache.getFirstLinkpathDest(embed.link.split("#")[0], path)?.path ?? embed.link,
-              kind: "embed"
-            }))
+              dst:
+                metadataCache.getFirstLinkpathDest(embed.link.split("#")[0], path)?.path ??
+                embed.link,
+              kind: "embed",
+            })),
           ],
           tags: (cache.tags ?? []).map((tag) => tag.tag.replace(/^#/, "")),
           headings: (cache.headings ?? []).map((heading) => ({
             level: heading.level,
             text: heading.heading,
             line: heading.position.start.line,
-            parentLine: 0
+            parentLine: 0,
           })),
-          frontmatter: cache.frontmatter ?? null
+          frontmatter: cache.frontmatter ?? null,
         };
         return index;
-      }
+      },
     };
   }
 }
 
 class MicrolithSettingTab extends PluginSettingTab {
-  constructor(app: App, private readonly plugin: MicrolithPlugin) {
+  constructor(
+    app: App,
+    private readonly plugin: MicrolithPlugin,
+  ) {
     super(app, plugin);
   }
 
@@ -243,43 +266,53 @@ class MicrolithSettingTab extends PluginSettingTab {
     new Setting(containerEl)
       .setName("Server URL")
       .setDesc("The Worker you deployed, for example https://microlith.example.workers.dev")
-      .addText((text) => text
-        .setValue(configuration.endpoint)
-        .onChange((value) => void this.plugin.updateConfiguration({ endpoint: value.trim() })));
+      .addText((text) =>
+        text
+          .setValue(configuration.endpoint)
+          .onChange((value) => void this.plugin.updateConfiguration({ endpoint: value.trim() })),
+      );
 
     new Setting(containerEl)
       .setName("Vault ID")
-      .addText((text) => text
-        .setValue(configuration.vaultId)
-        .onChange((value) => void this.plugin.updateConfiguration({ vaultId: value.trim() })));
+      .addText((text) =>
+        text
+          .setValue(configuration.vaultId)
+          .onChange((value) => void this.plugin.updateConfiguration({ vaultId: value.trim() })),
+      );
 
     new Setting(containerEl)
       .setName("Device token")
       .setDesc("Issued on the setup page of your Worker.")
       .addText((text) => {
         text.inputEl.type = "password";
-        text.setValue(configuration.token)
+        text
+          .setValue(configuration.token)
           .onChange((value) => void this.plugin.updateConfiguration({ token: value.trim() }));
       });
 
     new Setting(containerEl)
       .setName("Device name")
       .setDesc("Used in the name of conflict copies.")
-      .addText((text) => text
-        .setValue(configuration.deviceName)
-        .onChange((value) => void this.plugin.updateConfiguration({ deviceName: value.trim() })));
+      .addText((text) =>
+        text
+          .setValue(configuration.deviceName)
+          .onChange((value) => void this.plugin.updateConfiguration({ deviceName: value.trim() })),
+      );
 
     new Setting(containerEl)
       .setName("Sync all file types")
       .setDesc("Images, audio, video and PDFs are excluded by default, matching Obsidian Sync.")
-      .addToggle((toggle) => toggle
-        .setValue(configuration.syncAllFileTypes)
-        .onChange((value) => void this.plugin.updateConfiguration({ syncAllFileTypes: value })));
+      .addToggle((toggle) =>
+        toggle
+          .setValue(configuration.syncAllFileTypes)
+          .onChange((value) => void this.plugin.updateConfiguration({ syncAllFileTypes: value })),
+      );
 
-    new Setting(containerEl)
-      .addButton((button) => button
+    new Setting(containerEl).addButton((button) =>
+      button
         .setButtonText("Sync now")
         .setCta()
-        .onClick(() => void this.plugin.syncNow()));
+        .onClick(() => void this.plugin.syncNow()),
+    );
   }
 }
