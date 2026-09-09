@@ -1,8 +1,13 @@
 /** Worker の同期 API に話すクライアント。Obsidian に依存しないので単体で動かせる。 */
 
 export type Change = {
-  path: string; seq: number; rev: string; kind: "note" | "asset";
-  size: number; mtime: number; deleted: boolean;
+  path: string;
+  seq: number;
+  rev: string;
+  kind: "note" | "asset";
+  size: number;
+  mtime: number;
+  deleted: boolean;
 };
 
 export type NoteIndex = {
@@ -17,7 +22,10 @@ export type PushOutcome =
   | { status: "conflict"; rev: string; body: string | null };
 
 export class ServerError extends Error {
-  constructor(readonly status: number, message: string) {
+  constructor(
+    readonly status: number,
+    message: string,
+  ) {
     super(message);
   }
 }
@@ -39,7 +47,7 @@ export type HttpResponse = {
 
 export type HttpClient = (
   url: string,
-  init: { method?: string; headers?: Record<string, string>; body?: string | ArrayBuffer }
+  init: { method?: string; headers?: Record<string, string>; body?: string | ArrayBuffer },
 ) => Promise<HttpResponse>;
 
 const defaultHttp: HttpClient = (url, init) => fetch(url, init as RequestInit);
@@ -49,7 +57,7 @@ export class MicrolithClient {
     private readonly endpoint: string,
     private readonly vaultId: string,
     private readonly token: string,
-    private readonly http: HttpClient = defaultHttp
+    private readonly http: HttpClient = defaultHttp,
   ) {}
 
   private url(action: string, query: Record<string, string> = {}): string {
@@ -60,21 +68,27 @@ export class MicrolithClient {
 
   private async request(
     url: string,
-    init: { method?: string; headers?: Record<string, string>; body?: string | ArrayBuffer } = {}
+    init: { method?: string; headers?: Record<string, string>; body?: string | ArrayBuffer } = {},
   ): Promise<HttpResponse> {
     const response = await this.http(url, {
       ...init,
-      headers: { Authorization: `Bearer ${this.token}`, ...init.headers }
+      headers: { Authorization: `Bearer ${this.token}`, ...init.headers },
     });
     // 409 と 412 は正常な制御フロー。呼び出し側が分岐するのでここでは投げない。
     if (!response.ok && response.status !== 409 && response.status !== 412) {
-      throw new ServerError(response.status, `${init.method ?? "GET"} ${url}: ${await response.text()}`);
+      throw new ServerError(
+        response.status,
+        `${init.method ?? "GET"} ${url}: ${await response.text()}`,
+      );
     }
     return response;
   }
 
-  async changes(since: number): Promise<
-    { status: "ok"; seq: number; hasMore: boolean; changes: Change[] } | { status: "resync-required" }
+  async changes(
+    since: number,
+  ): Promise<
+    | { status: "ok"; seq: number; hasMore: boolean; changes: Change[] }
+    | { status: "resync-required" }
   > {
     const response = await this.request(this.url("changes", { since: String(since) }));
     if (response.status === 412) return { status: "resync-required" };
@@ -90,23 +104,33 @@ export class MicrolithClient {
   }
 
   async pushNote(input: {
-    path: string; baseRev: string | null; mtime: number; body?: string;
-    deleted?: boolean; index?: NoteIndex;
+    path: string;
+    baseRev: string | null;
+    mtime: number;
+    body?: string;
+    deleted?: boolean;
+    index?: NoteIndex;
   }): Promise<PushOutcome> {
     const response = await this.request(this.url("push"), {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify(input)
+      body: JSON.stringify(input),
     });
     return response.json();
   }
 
   async pushAsset(input: {
-    path: string; baseRev: string | null; mtime: number; data: ArrayBuffer;
+    path: string;
+    baseRev: string | null;
+    mtime: number;
+    data: ArrayBuffer;
   }): Promise<PushOutcome> {
     const query: Record<string, string> = { path: input.path, mtime: String(input.mtime) };
     if (input.baseRev) query.baseRev = input.baseRev;
-    const response = await this.request(this.url("asset", query), { method: "POST", body: input.data });
+    const response = await this.request(this.url("asset", query), {
+      method: "POST",
+      body: input.data,
+    });
     return response.json();
   }
 

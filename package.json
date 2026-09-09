@@ -1,32 +1,41 @@
 {
   "name": "microlith",
   "version": "0.1.0",
-  "license": "MIT",
   "private": true,
+  "license": "MIT",
   "workspaces": [
     "packages/*"
   ],
-  "allowScripts": {
-    "esbuild@0.28.1": true,
-    "esbuild@0.28.2": true,
-    "fsevents@2.3.3": true,
-    "workerd@1.20260820.1": true
-  },
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
+    "lint": "vp lint",
+    "lint:fix": "vp lint --fix",
+    "format": "vp fmt",
+    "format:check": "vp fmt --check",
+    "secretlint": "secretlint \"**/*\"",
     "typecheck": "tsc --noEmit && tsc --noEmit -p packages/blade",
-    "smoke": "node packages/core/test/smoke.mjs",
+    "check": "vp check && npm run secretlint && npm run typecheck && npm test",
+    "test": "npm run test:registry",
+    "smoke": "vp test packages/core/test/smoke.test.mjs",
     "build:blade": "npm run build --workspace @microlith/blade",
-    "test:blade": "esbuild packages/blade/test/sync.test.mjs --bundle --platform=node --format=esm --outfile=packages/blade/test/.build.mjs --log-level=warning && node packages/blade/test/.build.mjs",
-    "test:mcp": "node packages/core/test/mcp.test.mjs",
-    "test:oauth": "node packages/core/test/oauth.test.mjs",
-    "test:registry": "esbuild packages/core/test/registry.test.mjs --bundle --platform=node --format=esm --outfile=packages/core/test/.build.mjs --log-level=warning && node packages/core/test/.build.mjs"
+    "test:blade": "vp test packages/blade/test/sync.test.mjs",
+    "test:mcp": "vp test packages/core/test/mcp.test.mjs",
+    "test:oauth": "vp test packages/core/test/oauth.test.mjs",
+    "test:registry": "vp test packages/core/test/registry.test.mjs"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "5.20260825.1",
-    "typescript": "^5.9.2",
+    "@secretlint/secretlint-rule-preset-recommend": "13.0.5",
+    "secretlint": "13.0.5",
+    "typescript": "^7.0.2",
+    "vite-plus": "0.3.0",
     "wrangler": "4.125.0"
+  },
+  "allowScripts": {
+    "esbuild@0.28.1": true,
+    "fsevents@2.3.3": true,
+    "workerd@1.20260820.1": true
   },
   "cloudflare": {
     "bindings": {

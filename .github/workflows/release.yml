@@ -34,7 +34,7 @@ jobs:
             exit 1
           fi
 
-      - run: npm run typecheck
+      - run: npm run check
 
       - run: npm run build:blade
 

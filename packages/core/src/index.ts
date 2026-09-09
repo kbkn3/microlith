@@ -25,7 +25,10 @@ const bearer = (request: Request): string | null => {
   if (header) return header;
   // WebSocket API はカスタムヘッダを送れないので、`Sec-WebSocket-Protocol` に
   // `bearer, <token>` を載せる形も受ける。トークンをクエリ文字列に置くとアクセスログに残る。
-  const offered = request.headers.get("Sec-WebSocket-Protocol")?.split(",").map((v) => v.trim());
+  const offered = request.headers
+    .get("Sec-WebSocket-Protocol")
+    ?.split(",")
+    .map((v) => v.trim());
   return offered?.[0] === "bearer" && offered[1] ? offered[1] : null;
 };
 
@@ -82,7 +85,8 @@ const requireWrite = async (c: any, next: any) => {
 // --- 管理 -------------------------------------------------------------------
 
 app.get("/vault/:vaultId/devices", requireAdmin, async (c) =>
-  c.json({ devices: await c.get("vault").listDevices() }));
+  c.json({ devices: await c.get("vault").listDevices() }),
+);
 
 app.post("/vault/:vaultId/devices", requireAdmin, async (c) => {
   const { name, scope = "sync" } = await c.req.json<{ name: string; scope?: string }>();
@@ -109,16 +113,18 @@ app.get("/grants", requireAdmin, async (c) => {
   const page = await c.env.OAUTH_PROVIDER.listUserGrants("owner");
   // grant はクライアント名を持たないので引き直す。ID だけでは
   // 「どのアプリがどの Vault を見ているか」が読めず、パネルの意味が無い。
-  const named = await Promise.all(page.items.map(async (grant: any) => {
-    const client = await c.env.OAUTH_PROVIDER.lookupClient(grant.clientId).catch(() => null);
-    return {
-      id: grant.id,
-      vaultId: grant.metadata?.vaultId ?? null,
-      clientName: client?.clientName ?? grant.clientId,
-      scope: grant.scope,
-      createdAt: grant.createdAt
-    };
-  }));
+  const named = await Promise.all(
+    page.items.map(async (grant: any) => {
+      const client = await c.env.OAUTH_PROVIDER.lookupClient(grant.clientId).catch(() => null);
+      return {
+        id: grant.id,
+        vaultId: grant.metadata?.vaultId ?? null,
+        clientName: client?.clientName ?? grant.clientId,
+        scope: grant.scope,
+        createdAt: grant.createdAt,
+      };
+    }),
+  );
   return c.json({ grants: named });
 });
 
@@ -146,25 +152,29 @@ app.all("/vault/:vaultId/mcp", requireDevice, (c) => {
   if (!originAllowed(c.req.raw, allowedOriginsFrom(c.env.MCP_ALLOWED_ORIGINS))) {
     return c.json({ error: "origin not allowed" }, 403);
   }
-  return createVaultMcpHandler(c.get("vault"),
-    { canWrite: c.get("device").scope !== "mcp-read" }).fetch(c.req.raw);
+  return createVaultMcpHandler(c.get("vault"), {
+    canWrite: c.get("device").scope !== "mcp-read",
+  }).fetch(c.req.raw);
 });
 
 app.get("/vault/:vaultId/ws", requireDevice, (c) =>
   // タグに使うデバイス ID はクライアントの自己申告ではなく認証結果を使う。
-  c.get("vault").fetch(new Request(c.req.raw, {
-    headers: { ...Object.fromEntries(c.req.raw.headers), "X-Device-Id": c.get("device").id }
-  })));
+  c.get("vault").fetch(
+    new Request(c.req.raw, {
+      headers: { ...Object.fromEntries(c.req.raw.headers), "X-Device-Id": c.get("device").id },
+    }),
+  ),
+);
 
 app.get("/vault/:vaultId/status", requireDevice, async (c) =>
-  c.json(await c.get("vault").status()));
+  c.json(await c.get("vault").status()),
+);
 
 app.get("/vault/:vaultId/changes", requireDevice, async (c) => {
   const device = c.get("device");
-  const result = await c.get("vault").changes(
-    Number(c.req.query("since") ?? 0),
-    device.id === "admin" ? null : device.id
-  );
+  const result = await c
+    .get("vault")
+    .changes(Number(c.req.query("since") ?? 0), device.id === "admin" ? null : device.id);
   return result.status === "resync-required"
     ? c.json({ error: "resync-required", seq: result.seq }, 412)
     : c.json(result);
@@ -181,14 +191,18 @@ app.get("/vault/:vaultId/file", requireDevice, async (c) => {
   const object = await c.env.ASSETS.get(`assets/${head.rev}`);
   if (!object) return c.json({ error: "object missing" }, 404);
   return new Response(object.body, {
-    headers: { "content-type": "application/octet-stream", etag: head.rev }
+    headers: { "content-type": "application/octet-stream", etag: head.rev },
   });
 });
 
 app.post("/vault/:vaultId/push", requireDevice, requireWrite, async (c) => {
   const input = await c.req.json<{
-    path: string; baseRev: string | null; mtime: number;
-    body?: string; deleted?: boolean; index?: NoteIndex;
+    path: string;
+    baseRev: string | null;
+    mtime: number;
+    body?: string;
+    deleted?: boolean;
+    index?: NoteIndex;
   }>();
   const result = await c.get("vault").push({ ...input, kind: "note" });
   return result.status === "conflict" ? c.json(result, 409) : c.json(result);
@@ -206,14 +220,19 @@ app.post("/vault/:vaultId/asset", requireDevice, requireWrite, async (c) => {
   // 再送すれば同じ場所を上書きするだけで済む(orphan は GC 対象の重複でしかない)。
   await c.env.ASSETS.put(`assets/${rev}`, bytes);
   const result = await c.get("vault").push({
-    path, baseRev: c.req.query("baseRev") ?? null, kind: "asset",
-    mtime: Number(c.req.query("mtime") ?? Date.now()), rev, size: bytes.byteLength
+    path,
+    baseRev: c.req.query("baseRev") ?? null,
+    kind: "asset",
+    mtime: Number(c.req.query("mtime") ?? Date.now()),
+    rev,
+    size: bytes.byteLength,
   });
   return result.status === "conflict" ? c.json(result, 409) : c.json(result);
 });
 
 app.get("/vault/:vaultId/deleted", requireDevice, async (c) =>
-  c.json({ files: await c.get("vault").deletedFiles() }));
+  c.json({ files: await c.get("vault").deletedFiles() }),
+);
 
 app.post("/vault/:vaultId/restore", requireDevice, requireWrite, async (c) => {
   const path = c.req.query("path");
@@ -242,5 +261,5 @@ export default new OAuthProvider({
   authorizeEndpoint: "/authorize",
   tokenEndpoint: "/token",
   clientRegistrationEndpoint: "/register",
-  scopesSupported: ["mcp-read", "mcp-write"]
+  scopesSupported: ["mcp-read", "mcp-write"],
 });

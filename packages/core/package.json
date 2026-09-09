@@ -1,8 +1,8 @@
 {
   "name": "@microlith/core",
   "version": "0.1.0",
-  "license": "MIT",
   "private": true,
+  "license": "MIT",
   "type": "module",
   "dependencies": {
     "@cloudflare/workers-oauth-provider": "^0.10.3",

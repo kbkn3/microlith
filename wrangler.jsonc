@@ -7,7 +7,7 @@
   "compatibility_date": "2026-08-27",
   "observability": { "enabled": true },
   "durable_objects": {
-    "bindings": [{ "name": "VAULT", "class_name": "VaultDO" }]
+    "bindings": [{ "name": "VAULT", "class_name": "VaultDO" }],
   },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["VaultDO"] }],
   // ボタンはリソース名のデフォルト値を必要とする。provision 後に Cloudflare が書き換える。
@@ -16,5 +16,5 @@
   // id を書かないと wrangler が deploy 時に作る。Deploy ボタンでも同じく provision される。
   "kv_namespaces": [{ "binding": "OAUTH_KV" }],
   // 素の HTML で配信し build ステップを不要にしている。ビルド設定が空欄のままボタンが通る。
-  "assets": { "directory": "./packages/core/public", "binding": "SETUP_UI" }
+  "assets": { "directory": "./packages/core/public", "binding": "SETUP_UI" },
 }

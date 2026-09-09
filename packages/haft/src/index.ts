@@ -14,7 +14,6 @@ export async function contentHash(body: string | ArrayBuffer): Promise<string> {
   return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-
 export type ToolDefinition = {
   readonly name: string;
   readonly title?: string;
@@ -38,9 +37,9 @@ export const STRUCTURE_TOOLS: readonly ToolDefinition[] = [
       type: "object",
       properties: {
         depth: { type: "number", description: "How many folder levels to descend. Defaults to 3." },
-        prefix: { type: "string", description: "Only show this folder and below." }
-      }
-    }
+        prefix: { type: "string", description: "Only show this folder and below." },
+      },
+    },
   },
   {
     name: "note_outline",
@@ -50,9 +49,11 @@ export const STRUCTURE_TOOLS: readonly ToolDefinition[] = [
       "long note instead of the whole thing.",
     inputSchema: {
       type: "object",
-      properties: { path: { type: "string", description: "Vault-relative path, e.g. notes/idea.md" } },
-      required: ["path"]
-    }
+      properties: {
+        path: { type: "string", description: "Vault-relative path, e.g. notes/idea.md" },
+      },
+      required: ["path"],
+    },
   },
   {
     name: "backlinks",
@@ -61,8 +62,8 @@ export const STRUCTURE_TOOLS: readonly ToolDefinition[] = [
     inputSchema: {
       type: "object",
       properties: { path: { type: "string" } },
-      required: ["path"]
-    }
+      required: ["path"],
+    },
   },
   {
     name: "outlinks",
@@ -71,8 +72,8 @@ export const STRUCTURE_TOOLS: readonly ToolDefinition[] = [
     inputSchema: {
       type: "object",
       properties: { path: { type: "string" } },
-      required: ["path"]
-    }
+      required: ["path"],
+    },
   },
   {
     name: "graph_neighborhood",
@@ -84,10 +85,10 @@ export const STRUCTURE_TOOLS: readonly ToolDefinition[] = [
       type: "object",
       properties: {
         path: { type: "string" },
-        hops: { type: "number", description: "How many link hops to follow. Defaults to 2." }
+        hops: { type: "number", description: "How many link hops to follow. Defaults to 2." },
       },
-      required: ["path"]
-    }
+      required: ["path"],
+    },
   },
   {
     name: "orphan_notes",
@@ -95,8 +96,8 @@ export const STRUCTURE_TOOLS: readonly ToolDefinition[] = [
     description: "List notes that nothing links to and that link to nothing.",
     inputSchema: {
       type: "object",
-      properties: { limit: { type: "number", description: "Defaults to 50." } }
-    }
+      properties: { limit: { type: "number", description: "Defaults to 50." } },
+    },
   },
   {
     name: "hub_notes",
@@ -104,8 +105,8 @@ export const STRUCTURE_TOOLS: readonly ToolDefinition[] = [
     description: "List the most heavily linked notes, most connected first.",
     inputSchema: {
       type: "object",
-      properties: { limit: { type: "number", description: "Defaults to 20." } }
-    }
+      properties: { limit: { type: "number", description: "Defaults to 20." } },
+    },
   },
   {
     name: "find_by_tag",
@@ -113,9 +114,9 @@ export const STRUCTURE_TOOLS: readonly ToolDefinition[] = [
     description: "List the notes carrying a tag. Omit the tag to list every tag with its count.",
     inputSchema: {
       type: "object",
-      properties: { tag: { type: "string", description: "Without the leading #." } }
-    }
-  }
+      properties: { tag: { type: "string", description: "Without the leading #." } },
+    },
+  },
 ];
 
 /** 本文系: v1 では Local MCP のみが実装する(§7)。 */
@@ -127,8 +128,8 @@ export const CONTENT_TOOLS: readonly ToolDefinition[] = [
     inputSchema: {
       type: "object",
       properties: { path: { type: "string" } },
-      required: ["path"]
-    }
+      required: ["path"],
+    },
   },
   {
     name: "read_section",
@@ -137,8 +138,8 @@ export const CONTENT_TOOLS: readonly ToolDefinition[] = [
     inputSchema: {
       type: "object",
       properties: { path: { type: "string" }, heading: { type: "string" } },
-      required: ["path", "heading"]
-    }
+      required: ["path", "heading"],
+    },
   },
   {
     name: "search",
@@ -149,8 +150,8 @@ export const CONTENT_TOOLS: readonly ToolDefinition[] = [
     inputSchema: {
       type: "object",
       properties: { query: { type: "string" }, limit: { type: "number" } },
-      required: ["query"]
-    }
+      required: ["query"],
+    },
   },
   {
     name: "write_note",
@@ -160,9 +161,9 @@ export const CONTENT_TOOLS: readonly ToolDefinition[] = [
     inputSchema: {
       type: "object",
       properties: { path: { type: "string" }, content: { type: "string" } },
-      required: ["path", "content"]
-    }
-  }
+      required: ["path", "content"],
+    },
+  },
 ];
 
 export const ALL_TOOLS: readonly ToolDefinition[] = [...STRUCTURE_TOOLS, ...CONTENT_TOOLS];

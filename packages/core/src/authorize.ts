@@ -12,10 +12,17 @@ import type { Env, GrantProps } from "./env";
 export const authorize = new Hono<{ Bindings: Env }>();
 
 const escape = (value: string) =>
-  value.replace(/[&<>"']/g, (c) =>
-    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
+  value.replace(
+    /[&<>"']/g,
+    (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!,
+  );
 
-const page = (request: AuthRequest, clientName: string, vaults: string[], error?: string) => `<!doctype html>
+const page = (
+  request: AuthRequest,
+  clientName: string,
+  vaults: string[],
+  error?: string,
+) => `<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Authorize ${escape(clientName)}</title>
@@ -52,17 +59,21 @@ const page = (request: AuthRequest, clientName: string, vaults: string[], error?
   </ul>
   <form method="post">
     <label for="vaultId">Vault</label>
-    ${vaults.length > 0 ? `
+    ${
+      vaults.length > 0
+        ? `
     <select id="vaultId" name="vaultId">
       ${vaults.map((vault) => `<option value="${escape(vault)}">${escape(vault)}</option>`).join("")}
       <option value="">Create a new vault…</option>
     </select>
     <label for="newVaultId" id="newVaultLabel" hidden>New vault name</label>
     <input id="newVaultId" name="newVaultId" hidden>
-    ` : `
+    `
+        : `
     <p class="lead">No vault has been set up yet. Naming one here creates it.</p>
     <input id="vaultId" name="vaultId" value="default" required>
-    `}
+    `
+    }
     <label for="scope">Access</label>
     <select id="scope" name="scope">
       <option value="mcp-read">Read only</option>
@@ -116,12 +127,26 @@ authorize.post("/authorize", async (c) => {
 
   // 総当たりを避けるため、認証の失敗理由は分けずに一つの文言で返す。
   if (secret !== c.env.ADMIN_SECRET) {
-    return c.html(page(request, client?.clientName ?? request.clientId, vaults,
-      "Could not authorize with those details."), 401);
+    return c.html(
+      page(
+        request,
+        client?.clientName ?? request.clientId,
+        vaults,
+        "Could not authorize with those details.",
+      ),
+      401,
+    );
   }
   if (!vaultId) {
-    return c.html(page(request, client?.clientName ?? request.clientId, vaults,
-      "Pick a vault, or give the new one a name."), 400);
+    return c.html(
+      page(
+        request,
+        client?.clientName ?? request.clientId,
+        vaults,
+        "Pick a vault, or give the new one a name.",
+      ),
+      400,
+    );
   }
 
   await rememberVault(c.env, vaultId);
@@ -134,7 +159,7 @@ authorize.post("/authorize", async (c) => {
     userId: "owner",
     metadata: { vaultId },
     scope: [scope],
-    props
+    props,
   });
   return c.redirect(redirectTo, 302);
 });
