@@ -4,7 +4,7 @@
  * `npm run dev` の隣で `npm run test:blade` を実行する。
  */
 import assert from "node:assert/strict";
-import { test } from "vitest";
+import { test } from "vite-plus/test";
 import { MicrolithClient } from "../src/client.ts";
 import { SyncEngine, conflictCopyPath, isExcluded } from "../src/sync.ts";
 

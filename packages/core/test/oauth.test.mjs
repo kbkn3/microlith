@@ -9,7 +9,7 @@
  */
 import assert from "node:assert/strict";
 import { createHash, randomBytes } from "node:crypto";
-import { test } from "vitest";
+import { test } from "vite-plus/test";
 
 test("OAuth の認可経路を通す", async () => {
   const base = process.env.MICROLITH_URL ?? "http://localhost:8787";

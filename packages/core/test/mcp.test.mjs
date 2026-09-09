@@ -4,7 +4,7 @@
  * `npm run dev` の隣で `npm run test:mcp`。
  */
 import assert from "node:assert/strict";
-import { test } from "vitest";
+import { test } from "vite-plus/test";
 
 test("MCP エンドポイントを外部クライアントと同じ形で叩く", async () => {
   const base = process.env.MICROLITH_URL ?? "http://localhost:8787";

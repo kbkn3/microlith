@@ -4,7 +4,7 @@
  * Vitest から一連の順序を保って動かし、実サーバとの整合を確かめる。
  */
 import assert from "node:assert/strict";
-import { test } from "vitest";
+import { test } from "vite-plus/test";
 
 test("同期 API を実サーバと突き合わせる", async () => {
   const base = process.env.MICROLITH_URL ?? "http://localhost:8787";

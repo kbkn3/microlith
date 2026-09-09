@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { test } from "vitest";
+import { test } from "vite-plus/test";
 import { knownVaults } from "../src/registry.ts";
 
 test("旧形式の Vault 一覧を単一キーへ移行する", async () => {
