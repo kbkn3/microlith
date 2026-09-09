@@ -28,7 +28,7 @@
     "@cloudflare/workers-types": "5.20260825.1",
     "@secretlint/secretlint-rule-preset-recommend": "13.0.5",
     "secretlint": "13.0.5",
-    "typescript": "^5.9.2",
+    "typescript": "^7.0.2",
     "vite-plus": "0.3.0",
     "wrangler": "4.125.0"
   },
