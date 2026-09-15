@@ -38,6 +38,10 @@ test("同期エンジンを実サーバと突き合わせる", async () => {
       },
       readBinary: async (path) => files.get(path),
       write: async (path, body) => void files.set(path, body),
+      writeAndWaitForIndex: async (path, body) => {
+        files.set(path, body);
+        return { links: [], tags: [], headings: [] };
+      },
       writeBinary: async (path, data) => void files.set(path, data),
       remove: async (path) => void files.delete(path),
       exists: async (path) => files.has(path),
@@ -102,7 +106,26 @@ test("同期エンジンを実サーバと突き合わせる", async () => {
     "受信内容の押し返しで seq が進んでいる(往復が止まらない)",
   );
 
-  // --- 競合 ---------------------------------------------------------------------
+  for (const sync of ["push", "pull"]) {
+    const path = `merge-${sync}.md`;
+    await laptop.vault.write(path, "# 共通の見出し\n共通の本文。\n");
+    await laptop.engine.pushPath(path);
+    await phone.engine.pull();
+    await laptop.vault.write(path, "# ラップトップの見出し\n共通の本文。\n");
+    await laptop.engine.pushPath(path);
+    await phone.vault.write(path, "# 共通の見出し\n電話の本文。\n");
+    if (sync === "push") await phone.engine.pushPath(path);
+    else await phone.engine.pull();
+    assert.equal(phone.vault.files.get(path), "# ラップトップの見出し\n電話の本文。\n");
+    assert.equal(
+      [...phone.vault.files.keys()].some((name) => name.startsWith(`merge-${sync} (`)),
+      false,
+    );
+    await laptop.engine.pull();
+    assert.equal(laptop.vault.files.get(path), phone.vault.files.get(path));
+  }
+
+  // --- 同一行の競合 --------------------------------------------------------------
 
   await laptop.vault.write("note.md", "# 細石刃\n\nラップトップの編集。\n");
   await laptop.engine.pushPath("note.md");
