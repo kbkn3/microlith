@@ -2,7 +2,7 @@
 
 - Target release: `0.1.1`
 - Date: 2026-09-15
-- Status: awaiting written-spec approval
+- Status: approved
 
 ## Problem and value
 
@@ -187,8 +187,8 @@ Mobile validation is limited to build compatibility in this release; no real-dev
 
 - Decision: retain 30-day versions in `VaultDO` and perform conservative three-way note merging in the plugin with `node-diff3`.
 - Decision owner: project owner.
-- Approval evidence: design sections approved in the task conversation on 2026-09-15.
+- Approval evidence: design sections and the written specification approved in the task conversation on 2026-09-15.
 - Subject verdict: coherent; authority, failure behavior, compatibility, transition, and recovery are defined.
 - Engineering status: not started.
 - Release status: not ready; implementation and validation remain.
-- Next gate: approval of this written specification before producing the implementation plan.
+- Next gate: execute and review the implementation plan.
