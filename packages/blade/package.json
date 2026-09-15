@@ -9,7 +9,7 @@
   },
   "dependencies": {
     "@microlith/haft": "*",
-    "node-diff3": "^3.2.1"
+    "node-diff3": "3.2.1"
   },
   "devDependencies": {
     "obsidian": "1.13.1"
