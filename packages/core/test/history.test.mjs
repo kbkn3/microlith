@@ -12,7 +12,10 @@ vi.mock("cloudflare:workers", () => ({
   },
 }));
 
+vi.mock("@cloudflare/workers-oauth-provider", () => ({ default: class {} }));
+
 const { VaultDO } = await import("../src/vault.ts");
+const { app } = await import("../src/index.ts");
 
 function createVault() {
   const database = new DatabaseSync(":memory:");
@@ -140,4 +143,50 @@ test("VaultDO stores accepted revisions atomically and excludes tombstones", asy
   });
   assert.equal(removed.status, "ok");
   assert.equal((await vault.versions("note.md")).length, 2);
+});
+
+test("asset history restore leaves the current revision unchanged when its R2 object is absent", async () => {
+  const current = { rev: "current-revision" };
+  const headCalls = [];
+  let restoreCalls = 0;
+  const response = await app.fetch(
+    new Request("https://example.test/vault/test/restore?path=image.png&rev=retained-revision", {
+      method: "POST",
+      headers: { Authorization: "Bearer admin-secret" },
+    }),
+    {
+      ADMIN_SECRET: "admin-secret",
+      VAULT: {
+        getByName: () => ({
+          version: async () => ({
+            path: "image.png",
+            rev: "retained-revision",
+            kind: "asset",
+            body: null,
+            size: 4,
+            mtime: 1,
+            seq: 1,
+            created_at: 1,
+          }),
+          restoreVersion: async () => {
+            restoreCalls++;
+            current.rev = "changed-revision";
+            return { status: "ok", seq: 2, rev: current.rev };
+          },
+        }),
+      },
+      ASSETS: {
+        head: async (key) => {
+          headCalls.push(key);
+          return null;
+        },
+      },
+    },
+  );
+
+  assert.equal(response.status, 404);
+  assert.deepEqual(await response.json(), { error: "object missing" });
+  assert.deepEqual(headCalls, ["assets/retained-revision"]);
+  assert.equal(restoreCalls, 0, "R2 object が無いのに復元処理へ進んでいる");
+  assert.equal(current.rev, "current-revision", "R2 object が無いのに current revision が変わった");
 });

@@ -44,6 +44,13 @@ test("同期 API を実サーバと突き合わせる", async () => {
   });
   const readToken = readOnly.body.token;
 
+  const claimedAdmin = await call("devices", {
+    token: admin,
+    method: "POST",
+    body: { name: "claimed-admin", scope: "admin" },
+  });
+  const claimedAdminToken = claimedAdmin.body.token;
+
   // --- push と no-op -----------------------------------------------------------
 
   const note = "# 細石刃\n\n小さな刃を柄に植え込んで一つの道具にする複合具。\n";
@@ -183,6 +190,17 @@ test("同期 API を実サーバと突き合わせる", async () => {
     ).status,
     403,
     "管理者以外が履歴を復元できてしまう",
+  );
+  assert.equal(
+    (
+      await call("restore", {
+        token: claimedAdminToken,
+        method: "POST",
+        query: `?path=note.md&rev=${firstRevision}`,
+      })
+    ).status,
+    403,
+    "admin scope を自己申告したデバイストークンで履歴を復元できてしまう",
   );
   assert.equal(
     (

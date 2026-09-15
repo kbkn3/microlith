@@ -40,7 +40,7 @@ const secretEquals = (a: string, b: string): boolean => {
   return diff === 0;
 };
 
-const app = new Hono<{ Bindings: Env; Variables: Variables }>();
+export const app = new Hono<{ Bindings: Env; Variables: Variables }>();
 
 app.onError((error, c) => {
   // 例外をそのまま投げると HTML のエラーページが返り、クライアントが JSON を
@@ -257,7 +257,7 @@ app.post("/vault/:vaultId/restore", requireDevice, requireWrite, async (c) => {
     const result = await c.get("vault").restore(path);
     return result.status === "conflict" ? c.json(result, 409) : c.json(result);
   }
-  if (c.get("device").scope !== "admin") return c.json({ error: "forbidden" }, 403);
+  if (c.get("device").id !== "admin") return c.json({ error: "forbidden" }, 403);
   const vault = c.get("vault");
   const version = await vault.version(path, rev);
   if (!version) return c.json({ error: "not found" }, 404);
