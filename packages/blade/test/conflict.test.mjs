@@ -10,6 +10,7 @@ const mergedBody = "local\nremote\n";
 function fixture(configuration = {}) {
   const operations = [];
   const requests = [];
+  const writes = [];
   const files = new Map([["note.md", localBody]]);
   const revisions = new Map([["note.md", "base-revision"]]);
   const outcome = {
@@ -26,6 +27,7 @@ function fixture(configuration = {}) {
     mtime: async () => 1,
     indexOf: () => ({ marker: "stale-index" }),
     async write(path, body) {
+      writes.push({ path, body });
       operations.push(path === "note.md" ? "write original" : "write conflict copy");
       if (path !== "note.md" && configuration.copyWriteThrows) throw new Error("copy write failed");
       files.set(path, body);
@@ -58,6 +60,9 @@ function fixture(configuration = {}) {
       requests.push(input);
       if (input.path !== "note.md") {
         if (configuration.copyPushThrows) throw new Error("copy push failed");
+        if (configuration.copyPushConflicts) {
+          return { status: "conflict", rev: "other-copy-revision", body: "other local body" };
+        }
         return { status: "ok", seq: 3, rev: "copy-revision" };
       }
       if (requests.filter((request) => request.path === "note.md").length === 1) return outcome;
@@ -78,7 +83,7 @@ function fixture(configuration = {}) {
     deviceName: "phone",
     automaticMerge: configuration.automaticMerge,
   });
-  return { engine, files, state, requests, operations };
+  return { engine, files, state, requests, operations, writes };
 }
 
 function assertFallback(context, body = remoteBody, revision = "remote-revision") {
@@ -166,6 +171,47 @@ for (const [name, configuration] of [
     await assert.rejects(context.engine.pushPath("note.md"), /copy .* failed/);
     assert.equal(context.files.get("note.md"), localBody);
     assert.equal(context.state.revOf("note.md"), "base-revision");
+  });
+}
+
+for (const [mergeFailure, mergeConfiguration] of [
+  ["index 欠損", { missingIndex: true }],
+  ["再送例外", { retryThrows: true }],
+]) {
+  for (const [copyFailure, copyConfiguration] of [
+    ["コピー書き込み例外", { copyWriteThrows: true }],
+    ["コピー送信例外", { copyPushThrows: true }],
+  ]) {
+    test(`マージ書き込み後の${mergeFailure}と${copyFailure}でも元の本文を原本へ戻す`, async () => {
+      const context = fixture({ ...mergeConfiguration, ...copyConfiguration });
+      await assert.rejects(context.engine.pushPath("note.md"), /copy .* failed/);
+      assert.ok(context.operations.includes("write merged body"));
+      assert.equal(context.files.get("note.md"), localBody);
+      assert.equal(context.state.revOf("note.md"), "base-revision");
+      assert.equal(context.operations.includes("remove original"), false);
+      assert.ok(
+        context.writes
+          .filter((write) => write.path === "note.md")
+          .every((write) => write.body === localBody),
+      );
+      assert.equal(context.engine.isApplying("note.md"), false);
+    });
+  }
+}
+
+for (const body of [remoteBody, null]) {
+  test(`コピー送信が競合したら原本へのリモート${body === null ? "削除" : "本文適用"}を中止する`, async () => {
+    const context = fixture({ outcome: { body }, missingIndex: true, copyPushConflicts: true });
+    await assert.rejects(context.engine.pushPath("note.md"), /conflict/i);
+    assert.equal(context.files.get("note.md"), localBody);
+    assert.equal(context.state.revOf("note.md"), "base-revision");
+    assert.equal(context.operations.includes("remove original"), false);
+    assert.ok(
+      context.writes
+        .filter((write) => write.path === "note.md")
+        .every((write) => write.body === localBody),
+    );
+    assert.equal(context.engine.isApplying("note.md"), false);
   });
 }
 

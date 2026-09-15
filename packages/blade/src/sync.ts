@@ -183,6 +183,8 @@ export class SyncEngine {
             await this.state.save();
             return;
           }
+          // この後のコピー作成や送信が失敗しても、原文を原本に残す。
+          await this.vault.write(path, localBody);
         }
       }
 
@@ -199,9 +201,11 @@ export class SyncEngine {
         body: localBody,
         index: this.vault.indexOf(copy) ?? undefined,
       });
+      if (pushed.status === "conflict")
+        throw new Error(`Conflict copy ${copy} could not be synced.`);
       if (outcome.body === null) await this.vault.remove(path);
       else await this.vault.write(path, outcome.body);
-      if (pushed.status !== "conflict") this.state.setRev(copy, pushed.rev);
+      this.state.setRev(copy, pushed.rev);
       this.state.setRev(path, outcome.body === null ? null : outcome.rev);
       await this.state.save();
       this.notice(`Conflict on ${path}. Your version was kept as ${copy}.`);
