@@ -30,7 +30,7 @@ export type PushInput = {
 export type PushResult =
   | { status: "ok"; seq: number; rev: string }
   | { status: "unchanged"; seq: number; rev: string }
-  | { status: "conflict"; rev: string; body: string | null };
+  | { status: "conflict"; rev: string; body: string | null; baseBody?: string };
 
 export type VersionMetadata = {
   path: string;
@@ -221,6 +221,21 @@ export class VaultDO extends DurableObject<Env> {
     return row ?? null;
   }
 
+  async restoreVersion(path: string, rev: string): Promise<PushResult | null> {
+    const version = await this.version(path, rev);
+    if (!version || (version.kind === "note" && version.body === null)) return null;
+    const current = await this.head(path);
+    return this.push({
+      path,
+      baseRev: current && current.deleted === 0 ? current.rev : null,
+      kind: version.kind,
+      mtime: Date.now(),
+      body: version.body ?? undefined,
+      rev: version.rev,
+      size: version.size,
+    });
+  }
+
   async push(input: PushInput): Promise<PushResult> {
     const current = await this.head(input.path);
     const currentRev = current && current.deleted === 0 ? current.rev : null;
@@ -229,7 +244,16 @@ export class VaultDO extends DurableObject<Env> {
     const wasIndexed = current !== null && current.deleted === 0;
     if (currentRev !== input.baseRev) {
       const note = current?.kind === "note" ? await this.readNote(input.path) : null;
-      return { status: "conflict", rev: current?.rev ?? "", body: note?.body ?? null };
+      const base =
+        input.kind === "note" && input.baseRev
+          ? await this.version(input.path, input.baseRev)
+          : null;
+      return {
+        status: "conflict",
+        rev: current?.rev ?? "",
+        body: note?.body ?? null,
+        ...(base?.body === null || base?.body === undefined ? {} : { baseBody: base.body }),
+      };
     }
 
     const rev = input.deleted

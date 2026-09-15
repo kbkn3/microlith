@@ -65,6 +65,7 @@ test("同期 API を実サーバと突き合わせる", async () => {
   assert.equal(first.status, 200);
   assert.equal(first.body.status, "ok");
   assert.equal(first.body.seq, 1);
+  const firstRevision = first.body.rev;
 
   const again = await call("push", {
     token: device,
@@ -78,24 +79,33 @@ test("同期 API を実サーバと突き合わせる", async () => {
   );
   assert.equal(again.body.seq, 1, "no-op なのに seq が進んでいる");
 
-  // --- 競合 --------------------------------------------------------------------
+  // --- 競合と履歴 ---------------------------------------------------------------
+
+  const laterNote = `${note}後の版\n`;
+  const later = await call("push", {
+    token: device,
+    method: "POST",
+    body: { path: "note.md", baseRev: firstRevision, mtime: 3, body: laterNote },
+  });
+  assert.equal(later.body.status, "ok");
 
   const stale = await call("push", {
     token: device,
     method: "POST",
-    body: { path: "note.md", baseRev: "0".repeat(64), mtime: 3, body: "別の端末の編集\n" },
+    body: { path: "note.md", baseRev: firstRevision, mtime: 4, body: "別の端末の編集\n" },
   });
   assert.equal(stale.status, 409, "古い baseRev の push が通ってしまう");
-  assert.equal(stale.body.body, note, "競合レスポンスに現在の本文が入っていない");
+  assert.equal(stale.body.body, laterNote, "競合レスポンスに現在の本文が入っていない");
+  assert.equal(stale.body.baseBody, note, "競合レスポンスに base の本文が入っていない");
 
   // --- 更新と FTS5 の整合 --------------------------------------------------------
 
-  let rev = first.body.rev;
+  let rev = later.body.rev;
   for (let i = 0; i < 5; i++) {
     const updated = await call("push", {
       token: device,
       method: "POST",
-      body: { path: "note.md", baseRev: rev, mtime: 10 + i, body: `${note}追記 ${i}\n` },
+      body: { path: "note.md", baseRev: rev, mtime: 10 + i, body: `${laterNote}追記 ${i}\n` },
     });
     assert.equal(updated.body.status, "ok", `更新 ${i} が通らない`);
     rev = updated.body.rev;
@@ -120,6 +130,21 @@ test("同期 API を実サーバと突き合わせる", async () => {
 
   const incremental = await call("changes", { token: device, query: `?since=${changes.body.seq}` });
   assert.equal(incremental.body.changes.length, 0, "差分カーソルが効いていない");
+
+  assert.equal((await call("versions", { token: device, query: "?path=note.md" })).status, 401);
+  const history = await call("versions", { token: admin, query: "?path=note.md" });
+  assert.equal(history.status, 200);
+  assert.ok(history.body.versions.length >= 2);
+  const selected = await call("version", {
+    token: admin,
+    query: `?path=note.md&rev=${firstRevision}`,
+  });
+  assert.equal(selected.body.body, note);
+  assert.equal(
+    (await call("version", { token: admin, query: "?path=note.md&rev=missing" })).status,
+    404,
+    "存在しない履歴を読めてしまう",
+  );
 
   // --- 権限 --------------------------------------------------------------------
 
@@ -147,6 +172,36 @@ test("同期 API を実サーバと突き合わせる", async () => {
   assert.equal(restored.body.status, "ok", "復元できない");
   const back = await call("file", { token: device, query: "?path=note.md" });
   assert.ok(back.body.body.includes("追記 4"), "復元した本文が違う");
+
+  assert.equal(
+    (
+      await call("restore", {
+        token: device,
+        method: "POST",
+        query: `?path=note.md&rev=${firstRevision}`,
+      })
+    ).status,
+    403,
+    "管理者以外が履歴を復元できてしまう",
+  );
+  assert.equal(
+    (
+      await call("restore", {
+        token: admin,
+        method: "POST",
+        query: "?path=note.md&rev=missing",
+      })
+    ).status,
+    404,
+    "存在しない履歴を復元できてしまう",
+  );
+  const restoredFirst = await call("restore", {
+    token: admin,
+    method: "POST",
+    query: `?path=note.md&rev=${firstRevision}`,
+  });
+  assert.equal(restoredFirst.body.status, "ok", "ノートの履歴を復元できない");
+  assert.equal((await call("file", { token: device, query: "?path=note.md" })).body.body, note);
 
   // --- CORS を開けていないこと ---------------------------------------------------
 
@@ -188,6 +243,27 @@ test("同期 API を実サーバと突き合わせる", async () => {
     { method: "POST", headers: { Authorization: `Bearer ${device}` }, body: bytes },
   ).then((r) => r.json());
   assert.equal(resent.status, "unchanged", "添付の再送が no-op になっていない");
+
+  const laterBytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 6, 7, 8, 9, 10]);
+  const laterUploaded = await fetch(
+    `${base}/vault/${vault}/asset?path=img/a.png&mtime=42&baseRev=${uploaded.rev}`,
+    { method: "POST", headers: { Authorization: `Bearer ${device}` }, body: laterBytes },
+  ).then((r) => r.json());
+  assert.equal(laterUploaded.status, "ok", "添付の更新を保存できない");
+  const restoredAsset = await call("restore", {
+    token: admin,
+    method: "POST",
+    query: `?path=img/a.png&rev=${uploaded.rev}`,
+  });
+  assert.equal(restoredAsset.body.status, "ok", "添付の履歴を復元できない");
+  const restoredFile = await fetch(`${base}/vault/${vault}/file?path=img/a.png`, {
+    headers: { Authorization: `Bearer ${device}` },
+  });
+  assert.deepEqual(
+    new Uint8Array(await restoredFile.arrayBuffer()),
+    bytes,
+    "復元した添付の中身が違う",
+  );
 
   // --- Vault の削除 ----------------------------------------------------------------
 
