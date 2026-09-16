@@ -74,14 +74,14 @@ one Self-hosted LiveSync and Remotely Save make, and it is deliberate.
 
 Compared to Obsidian Sync:
 
-|                              | Obsidian Sync                      | Microlith                          |
-| ---------------------------- | ---------------------------------- | ---------------------------------- |
-| Conflicts                    | merge by default, or conflict file | conflict file only (merge planned) |
-| Version history              | notes 1 month, attachments 2 weeks | not yet, planned                   |
-| Deleted file recovery        | yes                                | yes, 30 days                       |
-| Images / audio / video / PDF | excluded by default                | same                               |
-| Max file size                | 5 MB / 200 MB by plan              | 100 MB                             |
-| Vault config (`.obsidian`)   | synced                             | not yet                            |
+|                              | Obsidian Sync                      | Microlith                       |
+| ---------------------------- | ---------------------------------- | ------------------------------- |
+| Conflicts                    | merge by default, or conflict file | automatic non-overlapping merge |
+| Version history              | notes 1 month, attachments 2 weeks | notes and attachments, 30 days  |
+| Deleted file recovery        | yes                                | yes, 30 days                    |
+| Images / audio / video / PDF | excluded by default                | same                            |
+| Max file size                | 5 MB / 200 MB by plan              | 100 MB                          |
+| Vault config (`.obsidian`)   | synced                             | not yet                         |
 
 ### Layout
 
@@ -112,7 +112,7 @@ Releasing the plugin is a tag push. The tag must equal the version in
 find the release; CI refuses the tag otherwise.
 
 ```bash
-git tag 0.1.0 && git push origin 0.1.0
+git tag 0.1.1 && git push origin 0.1.1
 ```
 
 The sync engine talks to an adapter rather than to Obsidian directly, so `test:blade` drives two
@@ -191,14 +191,14 @@ Microlith は**平文・セルフホスト専用**です。E2E 暗号化モー�
 
 Obsidian Sync との比較：
 
-|                           | Obsidian Sync                      | Microlith                        |
-| ------------------------- | ---------------------------------- | -------------------------------- |
-| 競合                      | 既定ではマージ、または競合ファイル | 競合ファイルのみ（マージは予定） |
-| バージョン履歴            | ノート1か月、添付2週間             | 未実装、対応予定                 |
-| 削除ファイルの復元        | 対応                               | 対応、30日間                     |
-| 画像・音声・動画・PDF     | 既定で除外                         | 同じ                             |
-| ファイルサイズ上限        | プランにより 5 MB / 200 MB         | 100 MB                           |
-| Vault 設定（`.obsidian`） | 同期対象                           | 未対応                           |
+|                           | Obsidian Sync                      | Microlith                    |
+| ------------------------- | ---------------------------------- | ---------------------------- |
+| 競合                      | 既定ではマージ、または競合ファイル | 競合しない変更を自動マージ   |
+| バージョン履歴            | ノート1か月、添付2週間             | ノートと添付ファイル、30日間 |
+| 削除ファイルの復元        | 対応                               | 対応、30日間                 |
+| 画像・音声・動画・PDF     | 既定で除外                         | 同じ                         |
+| ファイルサイズ上限        | プランにより 5 MB / 200 MB         | 100 MB                       |
+| Vault 設定（`.obsidian`） | 同期対象                           | 未対応                       |
 
 ### 構成
 
@@ -229,7 +229,7 @@ npm run build:blade    # Obsidian 用の packages/blade/main.js を生成
 一致しない場合は CI がリリースを中止します。
 
 ```bash
-git tag 0.1.0 && git push origin 0.1.0
+git tag 0.1.1 && git push origin 0.1.1
 ```
 
 同期エンジンは Obsidian 本体ではなくアダプターを介して動作します。そのため `test:blade` は

@@ -32,29 +32,29 @@ Excluded:
 
 ## Requirements
 
-| ID | Requirement |
-| --- | --- |
-| R1 | `VaultDO` remains the sole authority for current vault state and retained history. |
-| R2 | Accepted note and attachment revisions are retained for 30 days. |
-| R3 | Repeated acceptance of the same path and revision creates no duplicate history entry. |
-| R4 | Existing current and retained-deleted content is backfilled without destructive conversion. |
-| R5 | A note conflict includes the retained base body when available. |
-| R6 | The plugin retries once only when `node-diff3` reports a conflict-free merge. |
-| R7 | Any unsafe or incomplete merge path uses the existing conflict-copy behavior. |
-| R8 | A merged push uses an index derived from that exact merged body. |
-| R9 | Historical content browsing and revision-specific restoration require administrator scope. |
-| R10 | The feature remains interoperable when either client or server has not yet been upgraded. |
+| ID  | Requirement                                                                                 |
+| --- | ------------------------------------------------------------------------------------------- |
+| R1  | `VaultDO` remains the sole authority for current vault state and retained history.          |
+| R2  | Accepted note and attachment revisions are retained for 30 days.                            |
+| R3  | Repeated acceptance of the same path and revision creates no duplicate history entry.       |
+| R4  | Existing current and retained-deleted content is backfilled without destructive conversion. |
+| R5  | A note conflict includes the retained base body when available.                             |
+| R6  | The plugin retries once only when `node-diff3` reports a conflict-free merge.               |
+| R7  | Any unsafe or incomplete merge path uses the existing conflict-copy behavior.               |
+| R8  | A merged push uses an index derived from that exact merged body.                            |
+| R9  | Historical content browsing and revision-specific restoration require administrator scope.  |
+| R10 | The feature remains interoperable when either client or server has not yet been upgraded.   |
 
 ## Quality scenarios
 
-| ID | Scenario | Required response |
-| --- | --- | --- |
-| Q1 | Two devices edit different lines from the same retained base. | Merge locally and accept one retry without a conflict copy. |
-| Q2 | Two devices edit the same line, the base is unavailable, or deletion races with editing. | Preserve local content in a conflict copy and make the original reflect remote state. |
-| Q3 | A non-administrator requests history browsing or revision-specific restoration. | Reject the request without returning a historical body. |
-| Q4 | An existing vault starts on the new server. | Create the history schema and backfill current recoverable content idempotently. |
-| Q5 | A selected history row is corrupt or its R2 object is unavailable. | Fail the restore without changing current state. |
-| Q6 | A current revision is older than the retention window. | Keep current state authoritative while allowing its history row to expire. |
+| ID  | Scenario                                                                                 | Required response                                                                     |
+| --- | ---------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| Q1  | Two devices edit different lines from the same retained base.                            | Merge locally and accept one retry without a conflict copy.                           |
+| Q2  | Two devices edit the same line, the base is unavailable, or deletion races with editing. | Preserve local content in a conflict copy and make the original reflect remote state. |
+| Q3  | A non-administrator requests history browsing or revision-specific restoration.          | Reject the request without returning a historical body.                               |
+| Q4  | An existing vault starts on the new server.                                              | Create the history schema and backfill current recoverable content idempotently.      |
+| Q5  | A selected history row is corrupt or its R2 object is unavailable.                       | Fail the restore without changing current state.                                      |
+| Q6  | A current revision is older than the retention window.                                   | Keep current state authoritative while allowing its history row to expire.            |
 
 Release stops on any observed data loss, current/history inconsistency, unauthorized historical-body access, or migration failure.
 
@@ -171,15 +171,15 @@ Temporary compatibility fields and fallback branches are owned by the sync/histo
 
 ## Validation trace
 
-| Check | Covers |
-| --- | --- |
-| Schema initialization, backfill, deduplication, and 30-day purge tests | R1-R4, Q4, Q6 |
-| Note and attachment version retrieval/restoration tests | R2, R9, Q3, Q5 |
-| Non-overlapping, identical, Japanese-text, and trailing-newline merge tests | R5-R8, Q1 |
-| Same-line, missing-base, delete-versus-edit, re-conflict, and index-refresh fallback tests | R7-R8, Q2 |
-| Old-client/new-server and new-client/old-server contract tests | R10 |
-| Worker HTTP tests with authorization checks | R5, R9-R10, Q3 |
-| Plugin build plus repository `npm run check` | integration readiness |
+| Check                                                                                      | Covers                |
+| ------------------------------------------------------------------------------------------ | --------------------- |
+| Schema initialization, backfill, deduplication, and 30-day purge tests                     | R1-R4, Q4, Q6         |
+| Note and attachment version retrieval/restoration tests                                    | R2, R9, Q3, Q5        |
+| Non-overlapping, identical, Japanese-text, and trailing-newline merge tests                | R5-R8, Q1             |
+| Same-line, missing-base, delete-versus-edit, re-conflict, and index-refresh fallback tests | R7-R8, Q2             |
+| Old-client/new-server and new-client/old-server contract tests                             | R10                   |
+| Worker HTTP tests with authorization checks                                                | R5, R9-R10, Q3        |
+| Plugin build plus repository `npm run check`                                               | integration readiness |
 
 Mobile validation is limited to build compatibility in this release; no real-device behavior claim is made.
 

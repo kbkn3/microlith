@@ -1,7 +1,7 @@
 {
   "id": "microlith",
   "name": "Microlith",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "minAppVersion": "1.5.0",
   "description": "Sync your vault through your own Cloudflare Worker, and let Claude read and write it.",
   "author": "kbkn3",

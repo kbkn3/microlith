@@ -45,12 +45,14 @@
 ### Task 1: Durable Object version storage
 
 **Files:**
+
 - Modify: `packages/core/src/schema.ts`
 - Modify: `packages/core/src/vault.ts`
 - Create: `packages/core/test/history.test.mjs`
 - Modify: `package.json`
 
 **Interfaces:**
+
 - Produces: `HISTORY_RETENTION_MS`, `BACKFILL_VERSIONS_SQL`, and `PURGE_VERSIONS_SQL` from `schema.ts`.
 - Produces: `VersionMetadata`, `VersionRecord`, `VaultDO.versions(path)`, and `VaultDO.version(path, rev)`.
 - Preserves: `VaultDO.push(input): Promise<PushResult>` and all current-state tables as the authority.
@@ -80,8 +82,14 @@ test("version history backfill is idempotent and purge keeps current state", () 
   database.prepare(BACKFILL_VERSIONS_SQL).run(1500);
   database.prepare(BACKFILL_VERSIONS_SQL).run(1500);
   assert.equal(database.prepare("SELECT count(*) AS count FROM versions").get().count, 3);
-  assert.equal(database.prepare("SELECT body FROM versions WHERE rev = 'note-current'").get().body, "current");
-  assert.equal(database.prepare("SELECT body FROM versions WHERE rev = 'asset-current'").get().body, null);
+  assert.equal(
+    database.prepare("SELECT body FROM versions WHERE rev = 'note-current'").get().body,
+    "current",
+  );
+  assert.equal(
+    database.prepare("SELECT body FROM versions WHERE rev = 'asset-current'").get().body,
+    null,
+  );
   database.prepare(PURGE_VERSIONS_SQL).run(1500);
   assert.equal(database.prepare("SELECT count(*) AS count FROM versions").get().count, 2);
   assert.equal(database.prepare("SELECT count(*) AS count FROM files").get().count, 3);
@@ -122,7 +130,7 @@ this.sql.exec(
   input.path,
   rev,
   input.kind,
-  input.kind === "note" ? input.body ?? "" : null,
+  input.kind === "note" ? (input.body ?? "") : null,
   input.size ?? input.body?.length ?? 0,
   input.mtime,
   seq,
@@ -178,11 +186,13 @@ git commit -m "Add retained vault version storage"
 ### Task 2: Conflict base and administrator history API
 
 **Files:**
+
 - Modify: `packages/core/src/vault.ts`
 - Modify: `packages/core/src/index.ts`
 - Modify: `packages/core/test/smoke.test.mjs`
 
 **Interfaces:**
+
 - Consumes: `VaultDO.version(path, rev)` and `VaultDO.versions(path)` from Task 1.
 - Produces: conflict `{ status: "conflict"; rev: string; body: string | null; baseBody?: string }`.
 - Produces: `VaultDO.restoreVersion(path, rev): Promise<PushResult | null>`.
@@ -251,6 +261,7 @@ git commit -m "Expose protected vault history"
 ### Task 3: Pure three-way note merge
 
 **Files:**
+
 - Modify: `packages/blade/package.json`
 - Modify: `package-lock.json`
 - Create: `packages/blade/src/merge.ts`
@@ -258,6 +269,7 @@ git commit -m "Expose protected vault history"
 - Modify: `package.json`
 
 **Interfaces:**
+
 - Produces: `mergeNote(localBody: string, baseBody: string, remoteBody: string): string | null`.
 - Meaning: a string is conflict-free merged text; `null` means the caller must use conflict-copy fallback.
 
@@ -320,6 +332,7 @@ git commit -m "Add conservative note merge"
 ### Task 4: Sync retry and lossless fallback
 
 **Files:**
+
 - Modify: `packages/blade/src/client.ts`
 - Modify: `packages/blade/src/sync.ts`
 - Create: `packages/blade/test/conflict.test.mjs`
@@ -327,6 +340,7 @@ git commit -m "Add conservative note merge"
 - Modify: `package.json`
 
 **Interfaces:**
+
 - Consumes: `mergeNote` from Task 3 and optional `PushOutcome.baseBody` from Task 2.
 - Produces: `VaultAdapter.writeAndWaitForIndex(path, body): Promise<NoteIndex | null>`.
 - Produces: `SyncOptions.automaticMerge?: boolean`, interpreted as enabled unless exactly `false`.
@@ -395,9 +409,11 @@ git commit -m "Merge non-overlapping sync conflicts"
 ### Task 5: Obsidian exact-body index and default-on setting
 
 **Files:**
+
 - Modify: `packages/blade/src/main.ts`
 
 **Interfaces:**
+
 - Implements: `VaultAdapter.writeAndWaitForIndex(path, body)` using `metadataCache.on("changed")`.
 - Supplies: `automaticMerge: configuration.automaticMerge` to `SyncEngine`.
 
@@ -455,10 +471,12 @@ git commit -m "Wait for merged note metadata"
 ### Task 6: Setup version-history panel
 
 **Files:**
+
 - Modify: `packages/core/public/index.html`
 - Modify: `packages/core/test/smoke.test.mjs`
 
 **Interfaces:**
+
 - Consumes: administrator `versions`, `version`, and revision-aware `restore` routes from Task 2.
 - Produces: path search, newest-first list, note preview, attachment metadata, and confirmed restore in `/setup`.
 
@@ -483,7 +501,9 @@ Add one section following the deleted-files panel pattern:
     <div><label for="history-path">Path</label><input id="history-path" /></div>
     <button id="load-history">Load history</button>
   </div>
-  <table><tbody id="history"></tbody></table>
+  <table>
+    <tbody id="history"></tbody>
+  </table>
   <pre id="history-preview" hidden></pre>
 </section>
 ```
@@ -508,6 +528,7 @@ git commit -m "Add setup version history controls"
 ### Task 7: Release `0.1.1` consistency and full verification
 
 **Files:**
+
 - Modify: `package.json`
 - Modify: `package-lock.json`
 - Modify: `packages/blade/package.json`
@@ -518,6 +539,7 @@ git commit -m "Add setup version history controls"
 - Modify: `README.md`
 
 **Interfaces:**
+
 - Produces: one consistent `0.1.1` application/plugin version.
 - Preserves: `minAppVersion: "1.5.0"` and the no-`v` tag convention.
 
