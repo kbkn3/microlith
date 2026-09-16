@@ -500,8 +500,7 @@
     );
   }
 
-  async function loadHistory() {
-    const path = $("history-path").value.trim();
+  async function loadHistory(path = $("history-path").value.trim()) {
     if (!path) return note("Enter a path to load its history.", "error");
     const { versions } = await api("versions", { query: { path } });
     $("history-preview").hidden = true;
@@ -536,7 +535,7 @@
             return;
           await api("restore", { method: "POST", query: { path, rev: version.rev } });
           await refresh();
-          await loadHistory();
+          await loadHistory(path);
           note(`Restored ${path}.`, "ok");
         };
         actions.append(restore);

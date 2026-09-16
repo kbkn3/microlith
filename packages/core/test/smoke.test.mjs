@@ -32,6 +32,16 @@ test("同期 API を実サーバと突き合わせる", async () => {
   assert.equal(setup.status, 200);
   for (const id of ["history-panel", "history-path", "history-preview"])
     assert.ok(setupHtml.includes(`id="${id}"`), `setup UI に ${id} がない`);
+  assert.match(
+    setupHtml,
+    /async function loadHistory\(path = \$\("history-path"\)\.value\.trim\(\)\)/,
+    "履歴の再読込対象が入力欄に再束縛される",
+  );
+  assert.match(
+    setupHtml,
+    /await loadHistory\(path\);/,
+    "復元後に選んだ履歴の path を再読込していない",
+  );
 
   // --- 認証 -------------------------------------------------------------------
 
