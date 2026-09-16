@@ -297,6 +297,28 @@
       <tbody id="deleted"></tbody>
     </table>
   </section>
+
+  <section id="history-panel" hidden>
+    <h2>Version history</h2>
+    <div class="fields">
+      <div>
+        <label for="history-path">Path</label>
+        <input id="history-path" />
+      </div>
+      <button id="load-history">Load history</button>
+    </div>
+    <table>
+      <thead>
+        <tr>
+          <th>Saved</th>
+          <th>Size</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody id="history"></tbody>
+    </table>
+    <pre id="history-preview" hidden></pre>
+  </section>
 </main>
 
 <script>
@@ -478,6 +500,52 @@
     );
   }
 
+  async function loadHistory() {
+    const path = $("history-path").value.trim();
+    if (!path) return note("Enter a path to load its history.", "error");
+    const { versions } = await api("versions", { query: { path } });
+    $("history-preview").hidden = true;
+    $("history").replaceChildren(
+      ...versions.map((version) => {
+        const row = document.createElement("tr");
+        const saved = document.createElement("td");
+        saved.textContent = new Date(version.created_at).toLocaleString();
+        const size = document.createElement("td");
+        size.textContent = bytes(version.size);
+        const actions = document.createElement("td");
+        if (version.kind === "note") {
+          const preview = document.createElement("button");
+          preview.className = "secondary";
+          preview.textContent = "Preview";
+          preview.onclick = async () => {
+            const selected = await api("version", { query: { path, rev: version.rev } });
+            $("history-preview").textContent = selected.body;
+            $("history-preview").hidden = false;
+          };
+          actions.append(preview);
+        }
+        const restore = document.createElement("button");
+        restore.className = "secondary";
+        restore.textContent = "Restore";
+        restore.onclick = async () => {
+          if (
+            !window.confirm(
+              `Restore ${path} from ${new Date(version.created_at).toLocaleString()}?`,
+            )
+          )
+            return;
+          await api("restore", { method: "POST", query: { path, rev: version.rev } });
+          await refresh();
+          await loadHistory();
+          note(`Restored ${path}.`, "ok");
+        };
+        actions.append(restore);
+        row.append(saved, size, actions);
+        return row;
+      }),
+    );
+  }
+
   $("connect").onclick = async () => {
     state.secret = $("secret").value.trim();
     state.vault = $("vault").value.trim() || "default";
@@ -491,12 +559,14 @@
       rememberVault(state.vault);
       $("status-panel").hidden = false;
       $("devices-panel").hidden = false;
+      $("history-panel").hidden = false;
       note(`Connected to ${state.vault}.`, "ok");
     } catch (error) {
       $("status-panel").hidden = true;
       $("devices-panel").hidden = true;
       $("grants-panel").hidden = true;
       $("deleted-panel").hidden = true;
+      $("history-panel").hidden = true;
       note(
         String(error).includes("401")
           ? "That admin secret was not accepted."
@@ -524,6 +594,8 @@
     $("copy").textContent = "Copied";
     setTimeout(() => ($("copy").textContent = "Copy"), 1500);
   };
+
+  $("load-history").onclick = () => void loadHistory();
 
   renderKnownVaults();
   if (state.secret) $("secret").value = state.secret;

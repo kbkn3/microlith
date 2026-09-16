@@ -27,6 +27,12 @@ test("同期 API を実サーバと突き合わせる", async () => {
     return { status: response.status, body: text ? JSON.parse(text) : null };
   };
 
+  const setup = await fetch(base);
+  const setupHtml = await setup.text();
+  assert.equal(setup.status, 200);
+  for (const id of ["history-panel", "history-path", "history-preview"])
+    assert.ok(setupHtml.includes(`id="${id}"`), `setup UI に ${id} がない`);
+
   // --- 認証 -------------------------------------------------------------------
 
   const anonymous = await call("status", { token: "nope" });
