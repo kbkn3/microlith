@@ -38,7 +38,17 @@ test("同期エンジンを実サーバと突き合わせる", async () => {
       },
       readBinary: async (path) => files.get(path),
       write: async (path, body) => void files.set(path, body),
-      writeAndWaitForIndex: async (path, body) => {
+      create: async (path, body) => {
+        if (files.has(path)) throw new Error(`${path} already exists`);
+        files.set(path, body);
+      },
+      replaceIfUnchanged: async (path, expectedBody, body) => {
+        if (files.get(path) !== expectedBody) return false;
+        files.set(path, body);
+        return true;
+      },
+      writeAndWaitForIndex: async (path, body, expectedBody) => {
+        if (files.get(path) !== expectedBody) return null;
         files.set(path, body);
         return { links: [], tags: [], headings: [] };
       },
@@ -206,6 +216,25 @@ test("同期エンジンを実サーバと突き合わせる", async () => {
   await laptop.engine.pushPath("note.md");
   await phone.engine.pull();
   assert.equal(phone.vault.files.has("note.md"), false, "削除が伝播していない");
+
+  await laptop.vault.write("deleted-conflict.md", "shared body\n");
+  await laptop.engine.pushPath("deleted-conflict.md");
+  await phone.engine.pull();
+  await laptop.vault.remove("deleted-conflict.md");
+  await laptop.engine.pushPath("deleted-conflict.md");
+  await phone.vault.write("deleted-conflict.md", "local edit after remote deletion\n");
+  await phone.engine.pushPath("deleted-conflict.md");
+  await laptop.engine.pull();
+  for (const device of [laptop, phone]) {
+    assert.equal(
+      device.vault.files.get("deleted-conflict.md"),
+      "local edit after remote deletion\n",
+    );
+    const copy = [...device.vault.files.keys()].find((path) =>
+      path.startsWith("deleted-conflict (Conflicted copy"),
+    );
+    assert.equal(device.vault.files.get(copy), "local edit after remote deletion\n");
+  }
 
   // --- 除外 ---------------------------------------------------------------------
 

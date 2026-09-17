@@ -192,6 +192,20 @@ export default class MicrolithPlugin extends Plugin {
       if (file) await vault.modify(file, body);
       else await vault.create(path, body);
     };
+    const replaceIfUnchanged = async (
+      path: string,
+      expectedBody: string,
+      body: string,
+    ): Promise<boolean> => {
+      const file = fileAt(path);
+      if (!file) return false;
+      let replaced = false;
+      await vault.process(file, (currentBody) => {
+        replaced = currentBody === expectedBody;
+        return replaced ? body : currentBody;
+      });
+      return replaced;
+    };
     const toNoteIndex = (path: string, cache: CachedMetadata): NoteIndex => ({
       links: [
         ...(cache.links ?? []).map((link) => ({
@@ -227,7 +241,11 @@ export default class MicrolithPlugin extends Plugin {
         return vault.readBinary(file);
       },
       write,
-      writeAndWaitForIndex: async (path, body) => {
+      create: async (path, body) => {
+        await vault.create(path, body);
+      },
+      replaceIfUnchanged,
+      writeAndWaitForIndex: async (path, body, expectedBody) => {
         let finish!: (index: NoteIndex | null) => void;
         const index = new Promise<NoteIndex | null>((resolve) => {
           let finished = false;
@@ -244,7 +262,10 @@ export default class MicrolithPlugin extends Plugin {
           };
         });
         try {
-          await write(path, body);
+          if (!(await replaceIfUnchanged(path, expectedBody, body))) {
+            finish(null);
+            return null;
+          }
         } catch (error) {
           finish(null);
           throw error;

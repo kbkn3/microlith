@@ -49,8 +49,9 @@ afterEach(() => {
   delete globalThis.window;
 });
 
-function makePlugin(modify) {
+function makePlugin(modify, initialBody = "") {
   const file = new TFile("note.md");
+  let storedBody = initialBody;
   const operations = [];
   let changed;
   let registeredChanged;
@@ -76,11 +77,17 @@ function makePlugin(modify) {
     getAbstractFileByPath: (path) => (path === file.path ? file : null),
     modify: (target, body) => {
       operations.push("write");
+      storedBody = body;
       return modify({
         target,
         body,
         emit: (...arguments_) => changed?.(...arguments_),
       });
+    },
+    process: async (target, transform) => {
+      const body = transform(storedBody);
+      await vault.modify(target, body);
+      return body;
     },
   };
   const plugin = new MicrolithPlugin({
@@ -95,6 +102,7 @@ function makePlugin(modify) {
     file,
     metadataCache,
     operations,
+    read: () => storedBody,
   };
 }
 
@@ -107,13 +115,31 @@ test("waits for the exact path and body after subscribing", async () => {
     emit(file, body, { tags: [{ tag: "#correct" }] });
   });
 
-  assert.deepEqual(await adapter.writeAndWaitForIndex("note.md", "wanted"), {
+  assert.deepEqual(await adapter.writeAndWaitForIndex("note.md", "wanted", ""), {
     links: [],
     tags: ["correct"],
     headings: [],
     frontmatter: null,
   });
   assert.deepEqual(operations, ["subscribe", "write"]);
+  assert.equal(metadataCache.offrefCount, 1);
+  assert.equal(vi.getTimerCount(), 0);
+});
+
+test("atomic replacement preserves edits made after the expected snapshot", async () => {
+  const { adapter, read } = makePlugin(() => {}, "new user edit");
+  assert.equal(await adapter.replaceIfUnchanged("note.md", "old snapshot", "remote"), false);
+  assert.equal(read(), "new user edit");
+  assert.equal(await adapter.replaceIfUnchanged("note.md", "new user edit", "remote"), true);
+  assert.equal(read(), "remote");
+});
+
+test("a stale merge snapshot cancels the index wait without replacing the edit", async () => {
+  vi.useFakeTimers();
+  globalThis.window = globalThis;
+  const { adapter, read, metadataCache } = makePlugin(() => {}, "new user edit");
+  assert.equal(await adapter.writeAndWaitForIndex("note.md", "merged", "old snapshot"), null);
+  assert.equal(read(), "new user edit");
   assert.equal(metadataCache.offrefCount, 1);
   assert.equal(vi.getTimerCount(), 0);
 });
@@ -125,7 +151,7 @@ test("write failure cleans up and rethrows", async () => {
     throw new Error("disk failed");
   });
 
-  await assert.rejects(adapter.writeAndWaitForIndex("note.md", "wanted"), /disk failed/);
+  await assert.rejects(adapter.writeAndWaitForIndex("note.md", "wanted", ""), /disk failed/);
   assert.equal(metadataCache.offrefCount, 1);
   assert.equal(vi.getTimerCount(), 0);
 });
@@ -135,7 +161,7 @@ test("five-second timeout cleans up and returns null", async () => {
   globalThis.window = globalThis;
   const { adapter, metadataCache } = makePlugin(() => {});
 
-  const pending = adapter.writeAndWaitForIndex("note.md", "wanted");
+  const pending = adapter.writeAndWaitForIndex("note.md", "wanted", "");
   await vi.advanceTimersByTimeAsync(4_999);
   assert.equal(metadataCache.offrefCount, 0);
   await vi.advanceTimersByTimeAsync(1);
@@ -152,7 +178,7 @@ test("late callbacks do not clean up twice", async () => {
     emit(file, body, {});
   });
 
-  await adapter.writeAndWaitForIndex("note.md", "wanted");
+  await adapter.writeAndWaitForIndex("note.md", "wanted", "");
   emitRegistered(file, "wanted", {});
 
   assert.equal(metadataCache.offrefCount, 1);

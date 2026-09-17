@@ -11,7 +11,14 @@ export interface VaultAdapter {
   read(path: string): Promise<string>;
   readBinary(path: string): Promise<ArrayBuffer>;
   write(path: string, body: string): Promise<void>;
-  writeAndWaitForIndex?(path: string, body: string): Promise<NoteIndex | null>;
+  create(path: string, body: string): Promise<void>;
+  /** 比較と置換を原子的に行う。read/write を分けると待機中の編集を失う。 */
+  replaceIfUnchanged(path: string, expectedBody: string, body: string): Promise<boolean>;
+  writeAndWaitForIndex?(
+    path: string,
+    body: string,
+    expectedBody: string,
+  ): Promise<NoteIndex | null>;
   writeBinary(path: string, data: ArrayBuffer): Promise<void>;
   remove(path: string): Promise<void>;
   exists(path: string): Promise<boolean>;
@@ -164,7 +171,7 @@ export class SyncEngine {
         if (mergedBody !== null) {
           let mergedRev: string | undefined;
           try {
-            const index = await this.vault.writeAndWaitForIndex(path, mergedBody);
+            const index = await this.vault.writeAndWaitForIndex(path, mergedBody, localBody);
             if (index !== null) {
               const retried = await this.client.pushNote({
                 path,
@@ -188,7 +195,8 @@ export class SyncEngine {
           const latestBody = await this.vault.read(path);
           if (latestBody !== mergedBody) localBody = latestBody;
           // この後のコピー作成や送信が失敗しても、原文を原本に残す。
-          if (latestBody !== localBody) await this.vault.write(path, localBody);
+          if (latestBody !== localBody)
+            await this.vault.replaceIfUnchanged(path, latestBody, localBody);
         }
       }
 
@@ -200,7 +208,7 @@ export class SyncEngine {
         for (let suffix = 2; await this.vault.exists(copy); suffix++) {
           copy = copyPath.replace(/(\.md)$/i, ` ${suffix}$1`);
         }
-        await this.applyRemote(copy, async () => this.vault.write(copy, localBody));
+        await this.applyRemote(copy, async () => this.vault.create(copy, localBody));
         const pushed = await this.client.pushNote({
           path: copy,
           baseRev: null,
@@ -212,13 +220,18 @@ export class SyncEngine {
           throw new Error(`Conflict copy ${copy} could not be synced.`);
         this.state.setRev(copy, pushed.rev);
         // コピーの送信待ち中にも編集できるので、未退避の本文を上書きしない。
-        if ((await this.vault.read(path)) === localBody) break;
+        if ((await this.vault.read(path)) !== localBody) continue;
+        // 削除には原子的な本文比較がないため、原本を残して null base から再送する。
+        if (outcome.body === null) break;
+        if (await this.vault.replaceIfUnchanged(path, localBody, outcome.body)) break;
       }
-      if (outcome.body === null) await this.vault.remove(path);
-      else await this.vault.write(path, outcome.body);
       this.state.setRev(path, outcome.body === null ? null : outcome.rev);
       await this.state.save();
-      this.notice(`Conflict on ${path}. Your version was kept as ${copy}.`);
+      this.notice(
+        outcome.body === null
+          ? `Deletion conflict on ${path}. Your note was kept for resync, with a copy at ${copy}.`
+          : `Conflict on ${path}. Your version was kept as ${copy}.`,
+      );
       acceptedBody = outcome.body;
     });
     if (acceptedBody !== undefined) {
