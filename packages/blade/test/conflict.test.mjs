@@ -60,12 +60,15 @@ function fixture(configuration = {}) {
     },
     async writeAndWaitForIndex(path, body, expectedBody) {
       assert.equal(engine.isApplying(path), true);
-      if (files.get(path) !== expectedBody) return null;
+      if (files.get(path) !== expectedBody) return { applied: false };
+      if (configuration.writeThrows) throw new Error("write failed");
       operations.push("write merged body");
       files.set(path, body);
       await configuration.duringIndex?.({ engine, files });
-      if (configuration.indexThrows) throw new Error("index failed");
-      return configuration.missingIndex ? null : { marker: "merged-body-index" };
+      return {
+        applied: true,
+        index: configuration.missingIndex ? null : { marker: "merged-body-index" },
+      };
     },
   };
   if (configuration.missingMethod) delete vault.writeAndWaitForIndex;
@@ -170,6 +173,22 @@ test("metadata timeout 後の3回目の read 待機中の編集を失わない",
   assert.equal(edited, true);
   assert.ok([...context.files.values()].includes(editedBody), "read 待機中の編集が消えた");
   assert.ok(context.requests.some(({ body }) => body === editedBody));
+});
+
+test("マージ適用拒否時に mergedBody と同一の利用者編集を rollback しない", async () => {
+  const context = fixture({
+    duringRead: async ({ engine, files, reads, snapshot }) => {
+      if (reads !== 2) return;
+      assert.equal(snapshot, localBody);
+      assert.equal(engine.isApplying("note.md"), true);
+      files.set("note.md", mergedBody);
+      await engine.pushPath("note.md");
+    },
+  });
+  await context.engine.pushPath("note.md");
+  assert.ok([...context.files.values()].includes(mergedBody), "CAS 拒否後に利用者編集が消えた");
+  assert.ok(context.requests.some(({ body }) => body === mergedBody));
+  assert.equal(context.operations.includes("write merged body"), false);
 });
 
 for (const [timing, configuration, readNumber] of [
@@ -282,7 +301,7 @@ for (const [name, configuration] of [
   ["自動マージ無効", { automaticMerge: false }],
   ["exact-body index の欠損", { missingIndex: true }],
   ["index 待機契約の未実装", { missingMethod: true }],
-  ["index 待機の例外", { indexThrows: true }],
+  ["マージ書き込みの例外", { writeThrows: true }],
 ]) {
   test(`${name}ではマージを送らず原文を退避する`, async () => {
     const context = fixture(configuration);

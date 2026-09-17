@@ -18,7 +18,7 @@ export interface VaultAdapter {
     path: string,
     body: string,
     expectedBody: string,
-  ): Promise<NoteIndex | null>;
+  ): Promise<{ applied: false } | { applied: true; index: NoteIndex | null }>;
   writeBinary(path: string, data: ArrayBuffer): Promise<void>;
   remove(path: string): Promise<void>;
   exists(path: string): Promise<boolean>;
@@ -170,15 +170,17 @@ export class SyncEngine {
         const mergedBody = mergeNote(localBody, outcome.baseBody, outcome.body);
         if (mergedBody !== null) {
           let mergedRev: string | undefined;
+          let mergeApplied = false;
           try {
-            const index = await this.vault.writeAndWaitForIndex(path, mergedBody, localBody);
-            if (index !== null) {
+            const result = await this.vault.writeAndWaitForIndex(path, mergedBody, localBody);
+            mergeApplied = result.applied;
+            if (result.applied && result.index !== null) {
               const retried = await this.client.pushNote({
                 path,
                 baseRev: outcome.rev,
                 mtime: Date.now(),
                 body: mergedBody,
-                index,
+                index: result.index,
               });
               if (retried.status === "conflict") outcome = retried;
               else mergedRev = retried.rev;
@@ -192,11 +194,13 @@ export class SyncEngine {
             acceptedBody = mergedBody;
             return;
           }
-          const latestBody = await this.vault.read(path);
-          if (latestBody !== mergedBody) localBody = latestBody;
-          // この後のコピー作成や送信が失敗しても、原文を原本に残す。
-          if (latestBody !== localBody)
-            await this.vault.replaceIfUnchanged(path, latestBody, localBody);
+          if (mergeApplied) {
+            const latestBody = await this.vault.read(path);
+            if (latestBody !== mergedBody) localBody = latestBody;
+            // この後のコピー作成や送信が失敗しても、原文を原本に残す。
+            if (latestBody !== localBody)
+              await this.vault.replaceIfUnchanged(path, latestBody, localBody);
+          }
         }
       }
 

@@ -116,10 +116,13 @@ test("waits for the exact path and body after subscribing", async () => {
   });
 
   assert.deepEqual(await adapter.writeAndWaitForIndex("note.md", "wanted", ""), {
-    links: [],
-    tags: ["correct"],
-    headings: [],
-    frontmatter: null,
+    applied: true,
+    index: {
+      links: [],
+      tags: ["correct"],
+      headings: [],
+      frontmatter: null,
+    },
   });
   assert.deepEqual(operations, ["subscribe", "write"]);
   assert.equal(metadataCache.offrefCount, 1);
@@ -138,7 +141,9 @@ test("a stale merge snapshot cancels the index wait without replacing the edit",
   vi.useFakeTimers();
   globalThis.window = globalThis;
   const { adapter, read, metadataCache } = makePlugin(() => {}, "new user edit");
-  assert.equal(await adapter.writeAndWaitForIndex("note.md", "merged", "old snapshot"), null);
+  assert.deepEqual(await adapter.writeAndWaitForIndex("note.md", "merged", "old snapshot"), {
+    applied: false,
+  });
   assert.equal(read(), "new user edit");
   assert.equal(metadataCache.offrefCount, 1);
   assert.equal(vi.getTimerCount(), 0);
@@ -166,7 +171,7 @@ test("five-second timeout cleans up and returns null", async () => {
   assert.equal(metadataCache.offrefCount, 0);
   await vi.advanceTimersByTimeAsync(1);
 
-  assert.equal(await pending, null);
+  assert.deepEqual(await pending, { applied: true, index: null });
   assert.equal(metadataCache.offrefCount, 1);
   assert.equal(vi.getTimerCount(), 0);
 });

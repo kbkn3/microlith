@@ -48,9 +48,9 @@ test("同期エンジンを実サーバと突き合わせる", async () => {
         return true;
       },
       writeAndWaitForIndex: async (path, body, expectedBody) => {
-        if (files.get(path) !== expectedBody) return null;
+        if (files.get(path) !== expectedBody) return { applied: false };
         files.set(path, body);
-        return { links: [], tags: [], headings: [] };
+        return { applied: true, index: { links: [], tags: [], headings: [] } };
       },
       writeBinary: async (path, data) => void files.set(path, data),
       remove: async (path) => void files.delete(path),

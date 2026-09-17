@@ -264,13 +264,13 @@ export default class MicrolithPlugin extends Plugin {
         try {
           if (!(await replaceIfUnchanged(path, expectedBody, body))) {
             finish(null);
-            return null;
+            return { applied: false };
           }
         } catch (error) {
           finish(null);
           throw error;
         }
-        return index;
+        return { applied: true, index: await index };
       },
       writeBinary: async (path, data) => {
         const file = fileAt(path);
