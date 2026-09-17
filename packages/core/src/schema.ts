@@ -33,7 +33,7 @@ export const BACKFILL_VERSIONS_SQL = `INSERT OR IGNORE INTO versions
   (path, rev, kind, body, size, mtime, seq, created_at)
   SELECT f.path, f.rev, f.kind, n.body, f.size, f.mtime, f.seq, f.updated_at
   FROM files f LEFT JOIN notes n ON n.path = f.path
-  WHERE (f.deleted = 0 OR f.deleted_at >= ?)
+  WHERE f.deleted = 0 AND f.updated_at >= ?
     AND (f.kind = 'asset' OR n.body IS NOT NULL)`;
 
 export const PURGE_VERSIONS_SQL = "DELETE FROM versions WHERE created_at < ?";

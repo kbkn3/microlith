@@ -13,6 +13,7 @@ function fixture(configuration = {}) {
   const writes = [];
   const files = new Map([["note.md", localBody]]);
   const revisions = new Map([["note.md", "base-revision"]]);
+  let saved = false;
   const outcome = {
     status: "conflict",
     rev: "remote-revision",
@@ -40,6 +41,7 @@ function fixture(configuration = {}) {
       assert.equal(engine.isApplying(path), true);
       operations.push("write merged body");
       files.set(path, body);
+      await configuration.duringIndex?.({ engine, files });
       if (configuration.indexThrows) throw new Error("index failed");
       return configuration.missingIndex ? null : { marker: "merged-body-index" };
     },
@@ -53,12 +55,18 @@ function fixture(configuration = {}) {
       else revisions.set(path, revision);
     },
     paths: () => [...revisions.keys()],
-    save: async () => {},
+    save: async () => {
+      if (saved) return;
+      saved = true;
+      await configuration.duringSave?.({ engine, files });
+    },
   };
   const client = {
     async pushNote(input) {
       requests.push(input);
       if (input.path !== "note.md") {
+        if (requests.filter((request) => request.path !== "note.md").length === 1)
+          await configuration.duringCopyPush?.({ engine, files });
         if (configuration.copyPushThrows) throw new Error("copy push failed");
         if (configuration.copyPushConflicts) {
           return { status: "conflict", rev: "other-copy-revision", body: "other local body" };
@@ -66,6 +74,8 @@ function fixture(configuration = {}) {
         return { status: "ok", seq: 3, rev: "copy-revision" };
       }
       if (requests.filter((request) => request.path === "note.md").length === 1) return outcome;
+      if (requests.filter((request) => request.path === "note.md").length === 2)
+        await configuration.duringRetry?.({ engine, files, input });
       if (configuration.retryThrows) throw new Error("request failed");
       return configuration.retryOutcome ?? { status: "ok", seq: 2, rev: "merged-revision" };
     },
@@ -111,6 +121,83 @@ test("別行の競合を exact-body index と最新 revision で一度だけ再�
   assert.deepEqual([...context.files], [["note.md", mergedBody]]);
   assert.equal(context.state.revOf("note.md"), "merged-revision");
   assert.equal(context.engine.isApplying("note.md"), false);
+});
+
+for (const failure of ["timeout", "request", "conflict"]) {
+  test(`マージ待機中の編集を ${failure} 後も競合コピーに残す`, async () => {
+    const editedBody = "local\nremote\n編集中の追記\n";
+    const context = fixture({
+      missingIndex: failure === "timeout",
+      retryThrows: failure === "request",
+      retryOutcome:
+        failure === "conflict"
+          ? { status: "conflict", rev: "remote-revision", body: remoteBody }
+          : undefined,
+      duringIndex: async ({ engine, files }) => {
+        files.set("note.md", editedBody);
+        await engine.pushPath("note.md");
+      },
+    });
+    await context.engine.pushPath("note.md");
+    const copies = [...context.files].filter(([path]) => path !== "note.md");
+    assert.equal(copies.length, 1);
+    assert.equal(copies[0][1], editedBody);
+    assert.equal(context.requests.find((input) => input.path === copies[0][0]).body, editedBody);
+    assert.equal(context.files.get("note.md"), remoteBody);
+    assert.equal(context.engine.isApplying("note.md"), false);
+  });
+}
+
+for (const timing of ["index", "retry", "save"]) {
+  test(`マージ ${timing} 中の編集を成功した再送後に最新 revision で送る`, async () => {
+    const editedBody = "local\nremote\n編集中の追記\n";
+    const edit = async ({ engine, files }) => {
+      files.set("note.md", editedBody);
+      await engine.pushPath("note.md");
+    };
+    const context = fixture({
+      [{ index: "duringIndex", retry: "duringRetry", save: "duringSave" }[timing]]: edit,
+    });
+    await context.engine.pushPath("note.md");
+    assert.deepEqual(
+      context.requests.map(({ body }) => body),
+      [localBody, mergedBody, editedBody],
+    );
+    assert.equal(context.requests[2].baseRev, "merged-revision");
+    assert.deepEqual([...context.files], [["note.md", editedBody]]);
+    assert.equal(context.engine.isApplying("note.md"), false);
+  });
+}
+
+test("競合コピーの送信中に加えた編集もリモートの上書き前に退避する", async () => {
+  const editedBody = "local\nsecond\nコピー待ちの追記\n";
+  const context = fixture({
+    automaticMerge: false,
+    duringCopyPush: async ({ engine, files }) => {
+      files.set("note.md", editedBody);
+      await engine.pushPath("note.md");
+    },
+  });
+  await context.engine.pushPath("note.md");
+  assert.equal(context.files.get("note.md"), remoteBody);
+  assert.ok([...context.files.values()].includes(editedBody));
+  assert.equal(context.requests.at(-1).body, editedBody);
+});
+
+test("競合コピー後の状態保存中の編集も applying 解除後に再送する", async () => {
+  const editedBody = "first\nremote\n保存中の追記\n";
+  const context = fixture({
+    automaticMerge: false,
+    duringSave: async ({ engine, files }) => {
+      files.set("note.md", editedBody);
+      await engine.pushPath("note.md");
+    },
+  });
+  await context.engine.pushPath("note.md");
+  assert.equal(context.requests.at(-1).path, "note.md");
+  assert.equal(context.requests.at(-1).body, editedBody);
+  assert.equal(context.requests.at(-1).baseRev, "remote-revision");
+  assert.equal(context.files.get("note.md"), editedBody);
 });
 
 for (const [name, configuration] of [

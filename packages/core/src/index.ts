@@ -272,6 +272,7 @@ app.post("/vault/:vaultId/restore", requireDevice, requireWrite, async (c) => {
 // --- OAuth の同意画面と `/setup` ------------------------------------------------
 
 app.route("/", authorize);
+app.get("/setup", (c) => c.env.SETUP_UI.fetch(new Request(new URL("/", c.req.url), c.req.raw)));
 app.all("*", (c) => c.env.SETUP_UI.fetch(c.req.raw));
 
 /**

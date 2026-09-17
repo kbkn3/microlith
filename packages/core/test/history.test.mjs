@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
-import { test, vi } from "vite-plus/test";
-import { BACKFILL_VERSIONS_SQL, PURGE_VERSIONS_SQL, SCHEMA } from "../src/schema.ts";
+import { afterEach, test, vi } from "vite-plus/test";
+import { HISTORY_RETENTION_MS } from "../src/schema.ts";
 
 vi.mock("cloudflare:workers", () => ({
   DurableObject: class {
@@ -17,10 +17,12 @@ vi.mock("@cloudflare/workers-oauth-provider", () => ({ default: class {} }));
 const { VaultDO } = await import("../src/vault.ts");
 const { app } = await import("../src/index.ts");
 
-function createVault() {
-  const database = new DatabaseSync(":memory:");
+afterEach(() => vi.restoreAllMocks());
+
+async function createVault(database = new DatabaseSync(":memory:")) {
   let transactionDepth = 0;
   let requireTransaction = false;
+  let initialization = Promise.resolve();
   const sql = {
     exec(statement, ...values) {
       const normalized = statement.replaceAll(/\s+/g, " ").trim().toUpperCase();
@@ -37,16 +39,24 @@ function createVault() {
       ) {
         throw new Error("accepted revisions must be stored atomically");
       }
-      if (values.length === 0) {
-        database.exec(statement);
-        return [];
-      }
       return database.prepare(statement).all(...values);
     },
   };
   const context = {
+    blockConcurrencyWhile(callback) {
+      initialization = callback();
+      return initialization;
+    },
     storage: {
       sql,
+      async deleteAll() {
+        const tables = database
+          .prepare(
+            "SELECT name FROM sqlite_schema WHERE type = 'table' AND name NOT LIKE 'sqlite_%'",
+          )
+          .all();
+        for (const { name } of tables) database.exec(`DROP TABLE IF EXISTS "${name}"`);
+      },
       transactionSync(callback) {
         database.exec("BEGIN");
         transactionDepth++;
@@ -67,40 +77,13 @@ function createVault() {
   };
   globalThis.WebSocketRequestResponsePair ??= class {};
   const vault = new VaultDO(context, { ADMIN_SECRET: "test-secret" });
+  await initialization;
   requireTransaction = true;
-  return vault;
+  return { vault, database };
 }
 
-test("version history backfill is idempotent and purge keeps current state", () => {
-  const database = new DatabaseSync(":memory:");
-  for (const statement of SCHEMA) database.exec(statement);
-  database.exec(`
-    INSERT INTO notes(id, path, body) VALUES
-      (1, 'current.md', 'current'),
-      (2, 'deleted.md', 'deleted');
-    INSERT INTO files(path, seq, rev, kind, size, mtime, deleted, deleted_at, updated_at) VALUES
-      ('current.md', 1, 'note-current', 'note', 7, 100, 0, NULL, 1000),
-      ('deleted.md', 2, 'note-deleted', 'note', 7, 200, 1, 1900, 1900),
-      ('image.png', 3, 'asset-current', 'asset', 4, 300, 0, NULL, 2000);
-  `);
-  database.prepare(BACKFILL_VERSIONS_SQL).run(1500);
-  database.prepare(BACKFILL_VERSIONS_SQL).run(1500);
-  assert.equal(database.prepare("SELECT count(*) AS count FROM versions").get().count, 3);
-  assert.equal(
-    database.prepare("SELECT body FROM versions WHERE rev = 'note-current'").get().body,
-    "current",
-  );
-  assert.equal(
-    database.prepare("SELECT body FROM versions WHERE rev = 'asset-current'").get().body,
-    null,
-  );
-  database.prepare(PURGE_VERSIONS_SQL).run(1500);
-  assert.equal(database.prepare("SELECT count(*) AS count FROM versions").get().count, 2);
-  assert.equal(database.prepare("SELECT count(*) AS count FROM files").get().count, 3);
-});
-
 test("VaultDO stores accepted revisions atomically and excludes tombstones", async () => {
-  const vault = createVault();
+  const { vault } = await createVault();
   const first = await vault.push({
     path: "note.md",
     baseRev: null,
@@ -143,6 +126,247 @@ test("VaultDO stores accepted revisions atomically and excludes tombstones", asy
   });
   assert.equal(removed.status, "ok");
   assert.equal((await vault.versions("note.md")).length, 2);
+});
+
+for (const kind of ["note", "asset"]) {
+  test(`legacy deleted ${kind} backfill never uses the tombstone as a content revision`, async () => {
+    const { vault, database } = await createVault();
+    const path = kind === "note" ? "legacy.md" : "image.png";
+    const accepted = await vault.push({
+      path,
+      kind,
+      baseRev: null,
+      mtime: 1,
+      body: "残す本文\n",
+      rev: "asset-revision",
+      size: 5,
+    });
+    const removed = await vault.push({
+      path,
+      kind,
+      baseRev: accepted.rev,
+      mtime: 2,
+      deleted: true,
+    });
+    database.exec("DROP TABLE versions; DELETE FROM meta WHERE key = 'history_backfilled_at'");
+    const migrated = (await createVault(database)).vault;
+    assert.equal(await migrated.version(path, removed.rev), null);
+    if (kind === "note") {
+      const version = await migrated.version(path, accepted.rev);
+      assert.equal(version.body, "残す本文\n");
+      assert.equal(version.size, 5);
+      assert.equal((await (await createVault(database)).vault.versions(path)).length, 1);
+      assert.equal((await migrated.restoreVersion(path, accepted.rev)).rev, accepted.rev);
+      assert.equal((await migrated.readNote(path)).body, "残す本文\n");
+    } else {
+      assert.deepEqual(await migrated.versions(path), []);
+    }
+  });
+}
+
+test("legacy backfill retains current content at the cutoff and skips older rows", async () => {
+  const now = Date.now();
+  vi.spyOn(Date, "now").mockReturnValue(now);
+  const { vault, database } = await createVault();
+  const note = await vault.push({
+    path: "note.md",
+    kind: "note",
+    baseRev: null,
+    mtime: 1,
+    body: "note",
+  });
+  const asset = await vault.push({
+    path: "image.png",
+    kind: "asset",
+    baseRev: null,
+    mtime: 2,
+    rev: "asset-revision",
+    size: 4,
+  });
+  await vault.push({ path: "expired.md", kind: "note", baseRev: null, mtime: 3, body: "expired" });
+  database
+    .prepare("UPDATE files SET updated_at = ? WHERE path = ?")
+    .run(now - HISTORY_RETENTION_MS, "note.md");
+  database
+    .prepare("UPDATE files SET updated_at = ? WHERE path = ?")
+    .run(now - HISTORY_RETENTION_MS - 1, "expired.md");
+  database.exec("DROP TABLE versions; DELETE FROM meta WHERE key = 'history_backfilled_at'");
+  const migrated = (await createVault(database)).vault;
+  assert.equal((await migrated.version("note.md", note.rev)).body, "note");
+  assert.equal((await migrated.versions("note.md")).length, 1);
+  assert.equal((await migrated.version("image.png", asset.rev)).body, null);
+  assert.deepEqual(await migrated.versions("expired.md"), []);
+  assert.equal((await migrated.readNote("expired.md")).body, "expired");
+  assert.equal((await (await createVault(database)).vault.versions("note.md")).length, 1);
+});
+
+test("failed legacy hash backfill leaves the completion marker absent for a retry", async () => {
+  const { vault, database } = await createVault();
+  const note = await vault.push({
+    path: "note.md",
+    kind: "note",
+    baseRev: null,
+    mtime: 1,
+    body: "retained",
+  });
+  await vault.push({ path: "note.md", kind: "note", baseRev: note.rev, mtime: 2, deleted: true });
+  database.exec("DROP TABLE versions; DELETE FROM meta WHERE key = 'history_backfilled_at'");
+  const digest = vi.spyOn(crypto.subtle, "digest").mockRejectedValueOnce(new Error("hash failed"));
+  await assert.rejects(createVault(database), /hash failed/);
+  assert.equal(
+    database.prepare("SELECT value FROM meta WHERE key = 'history_backfilled_at'").get(),
+    undefined,
+  );
+  digest.mockRestore();
+  const migrated = (await createVault(database)).vault;
+  assert.equal((await migrated.version("note.md", note.rev)).body, "retained");
+  assert.ok(database.prepare("SELECT value FROM meta WHERE key = 'history_backfilled_at'").get());
+});
+
+test("note history with a mismatched content hash cannot change current state", async () => {
+  const { vault, database } = await createVault();
+  const first = await vault.push({
+    path: "note.md",
+    kind: "note",
+    baseRev: null,
+    mtime: 1,
+    body: "first",
+  });
+  await vault.push({
+    path: "note.md",
+    kind: "note",
+    baseRev: first.rev,
+    mtime: 2,
+    body: "current",
+  });
+  database.prepare("UPDATE versions SET body = ? WHERE rev = ?").run("corrupt", first.rev);
+  const before = await vault.head("note.md");
+  assert.equal(await vault.restoreVersion("note.md", first.rev), null);
+  assert.deepEqual(await vault.head("note.md"), before);
+  assert.equal((await vault.readNote("note.md")).body, "current");
+});
+
+for (const action of ["list", "read", "restore"]) {
+  test(`expired history is unavailable to ${action} before the next purge`, async () => {
+    const now = Date.now();
+    vi.spyOn(Date, "now").mockReturnValue(now);
+    const { vault, database } = await createVault();
+    const accepted = await vault.push({
+      path: "note.md",
+      kind: "note",
+      baseRev: null,
+      mtime: 1,
+      body: "current",
+    });
+    database.prepare("UPDATE versions SET created_at = ?").run(now - HISTORY_RETENTION_MS - 1);
+    const before = await vault.head("note.md");
+    if (action === "list") assert.deepEqual(await vault.versions("note.md"), []);
+    if (action === "read") assert.equal(await vault.version("note.md", accepted.rev), null);
+    if (action === "restore")
+      assert.equal(await vault.restoreVersion("note.md", accepted.rev), null);
+    assert.deepEqual(await vault.head("note.md"), before);
+    assert.equal((await vault.readNote("note.md")).body, "current");
+  });
+}
+
+for (const deleted of [false, true]) {
+  test(`purge followed by reinitialization does not resurrect expired ${deleted ? "deleted" : "current"} history`, async () => {
+    const now = Date.now();
+    const clock = vi.spyOn(Date, "now").mockReturnValue(now);
+    const { vault, database } = await createVault();
+    const accepted = await vault.push({
+      path: "old.md",
+      kind: "note",
+      baseRev: null,
+      mtime: 1,
+      body: "current",
+    });
+    clock.mockReturnValue(now + HISTORY_RETENTION_MS + 1);
+    await vault.push(
+      deleted
+        ? { path: "old.md", kind: "note", baseRev: accepted.rev, mtime: 2, deleted: true }
+        : { path: "new.md", kind: "note", baseRev: null, mtime: 2, body: "new" },
+    );
+    assert.equal(
+      database.prepare("SELECT count(*) AS count FROM versions WHERE path = ?").get("old.md").count,
+      0,
+    );
+    const migrated = (await createVault(database)).vault;
+    assert.equal(
+      database.prepare("SELECT count(*) AS count FROM versions WHERE path = ?").get("old.md").count,
+      0,
+    );
+    if (deleted) {
+      assert.equal(await migrated.readNote("old.md"), null);
+      assert.equal((await migrated.restore("old.md")).rev, accepted.rev);
+    } else {
+      assert.deepEqual(
+        { ...(await migrated.readNote("old.md")) },
+        { rev: accepted.rev, body: "current" },
+      );
+    }
+  });
+}
+
+test("a reused destroyed vault does not backfill expired deleted history on restart", async () => {
+  const now = Date.now();
+  const clock = vi.spyOn(Date, "now").mockReturnValue(now);
+  const { vault, database } = await createVault();
+  await vault.destroy();
+  const accepted = await vault.push({
+    path: "note.md",
+    kind: "note",
+    baseRev: null,
+    mtime: 1,
+    body: "retained",
+  });
+  clock.mockReturnValue(now + HISTORY_RETENTION_MS + 1);
+  await vault.push({
+    path: "note.md",
+    kind: "note",
+    baseRev: accepted.rev,
+    mtime: 2,
+    deleted: true,
+  });
+  const migrated = (await createVault(database)).vault;
+  assert.deepEqual(await migrated.versions("note.md"), []);
+  assert.equal((await migrated.restore("note.md")).rev, accepted.rev);
+});
+
+test("conflict baseBody preserves an empty base and omits an unavailable base", async () => {
+  const { vault } = await createVault();
+  const empty = await vault.push({
+    path: "note.md",
+    kind: "note",
+    baseRev: null,
+    mtime: 1,
+    body: "",
+  });
+  await vault.push({
+    path: "note.md",
+    kind: "note",
+    baseRev: empty.rev,
+    mtime: 2,
+    body: "current",
+  });
+  const conflict = await vault.push({
+    path: "note.md",
+    kind: "note",
+    baseRev: empty.rev,
+    mtime: 3,
+    body: "local",
+  });
+  assert.equal(conflict.status, "conflict");
+  assert.equal(conflict.baseBody, "");
+  const missing = await vault.push({
+    path: "note.md",
+    kind: "note",
+    baseRev: "unavailable",
+    mtime: 3,
+    body: "local",
+  });
+  assert.equal(missing.status, "conflict");
+  assert.equal(Object.hasOwn(missing, "baseBody"), false);
 });
 
 test("asset history restore leaves the current revision unchanged when its R2 object is absent", async () => {

@@ -30,18 +30,11 @@ test("同期 API を実サーバと突き合わせる", async () => {
   const setup = await fetch(base);
   const setupHtml = await setup.text();
   assert.equal(setup.status, 200);
+  const setupAlias = await fetch(`${base}/setup`);
+  assert.equal(setupAlias.status, 200);
+  assert.equal(await setupAlias.text(), setupHtml);
   for (const id of ["history-panel", "history-path", "history-preview"])
     assert.ok(setupHtml.includes(`id="${id}"`), `setup UI に ${id} がない`);
-  assert.match(
-    setupHtml,
-    /async function loadHistory\(path = \$\("history-path"\)\.value\.trim\(\)\)/,
-    "履歴の再読込対象が入力欄に再束縛される",
-  );
-  assert.match(
-    setupHtml,
-    /await loadHistory\(path\);/,
-    "復元後に選んだ履歴の path を再読込していない",
-  );
 
   // --- 認証 -------------------------------------------------------------------
 
@@ -120,6 +113,13 @@ test("同期 API を実サーバと突き合わせる", async () => {
   assert.equal(stale.status, 409, "古い baseRev の push が通ってしまう");
   assert.equal(stale.body.body, laterNote, "競合レスポンスに現在の本文が入っていない");
   assert.equal(stale.body.baseBody, note, "競合レスポンスに base の本文が入っていない");
+  const missingBase = await call("push", {
+    token: device,
+    method: "POST",
+    body: { path: "note.md", baseRev: "unavailable", mtime: 4, body: "local" },
+  });
+  assert.equal(missingBase.status, 409);
+  assert.equal(Object.hasOwn(missingBase.body, "baseBody"), false);
 
   // --- 更新と FTS5 の整合 --------------------------------------------------------
 
@@ -155,6 +155,12 @@ test("同期 API を実サーバと突き合わせる", async () => {
   assert.equal(incremental.body.changes.length, 0, "差分カーソルが効いていない");
 
   assert.equal((await call("versions", { token: device, query: "?path=note.md" })).status, 401);
+  const deniedHistory = await call("version", {
+    token: device,
+    query: `?path=note.md&rev=${firstRevision}`,
+  });
+  assert.equal(deniedHistory.status, 401);
+  assert.equal(Object.hasOwn(deniedHistory.body, "body"), false);
   const history = await call("versions", { token: admin, query: "?path=note.md" });
   assert.equal(history.status, 200);
   assert.ok(history.body.versions.length >= 2);
@@ -236,6 +242,24 @@ test("同期 API を実サーバと突き合わせる", async () => {
   });
   assert.equal(restoredFirst.body.status, "ok", "ノートの履歴を復元できない");
   assert.equal((await call("file", { token: device, query: "?path=note.md" })).body.body, note);
+
+  const emptyBase = await call("push", {
+    token: device,
+    method: "POST",
+    body: { path: "empty.md", baseRev: null, mtime: 1, body: "" },
+  });
+  await call("push", {
+    token: device,
+    method: "POST",
+    body: { path: "empty.md", baseRev: emptyBase.body.rev, mtime: 2, body: "current" },
+  });
+  const emptyConflict = await call("push", {
+    token: device,
+    method: "POST",
+    body: { path: "empty.md", baseRev: emptyBase.body.rev, mtime: 3, body: "local" },
+  });
+  assert.equal(emptyConflict.status, 409);
+  assert.equal(emptyConflict.body.baseBody, "");
 
   // --- CORS を開けていないこと ---------------------------------------------------
 

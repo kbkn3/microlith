@@ -16,7 +16,7 @@
     "secretlint": "secretlint \"**/*\"",
     "typecheck": "tsc --noEmit && tsc --noEmit -p packages/blade",
     "check": "vp check && npm run secretlint && npm run typecheck && npm test",
-    "test": "vp test packages/core/test/registry.test.mjs packages/core/test/history.test.mjs packages/blade/test/merge.test.mjs packages/blade/test/conflict.test.mjs packages/blade/test/adapter.test.mjs",
+    "test": "vp test packages/core/test/registry.test.mjs packages/core/test/history.test.mjs packages/core/test/setup.test.mjs packages/blade/test/merge.test.mjs packages/blade/test/conflict.test.mjs packages/blade/test/adapter.test.mjs",
     "smoke": "vp test packages/core/test/smoke.test.mjs",
     "build:blade": "npm run build --workspace @microlith/blade",
     "test:blade": "vp test packages/blade/test/sync.test.mjs",

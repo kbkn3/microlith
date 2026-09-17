@@ -134,7 +134,7 @@ export class SyncEngine {
       body,
       index: this.vault.indexOf(path) ?? undefined,
     });
-    if (outcome.status === "conflict") return this.resolveNoteConflict(path, body, outcome);
+    if (outcome.status === "conflict") return this.resolveNoteConflict(path, outcome);
     this.state.setRev(path, outcome.rev);
     await this.state.save();
   }
@@ -149,10 +149,11 @@ export class SyncEngine {
 
   private async resolveNoteConflict(
     path: string,
-    localBody: string,
     outcome: { rev: string; body: string | null; baseBody?: string },
   ): Promise<void> {
+    let acceptedBody: string | null | undefined;
     await this.applyRemote(path, async () => {
+      let localBody = await this.vault.read(path);
       if (
         this.options.automaticMerge !== false &&
         outcome.body !== null &&
@@ -176,40 +177,54 @@ export class SyncEngine {
               else mergedRev = retried.rev;
             }
           } catch {
-            // 送信失敗でもマージ前の本文を退避し、通常の競合処理へ戻す。
+            // 送信結果が不明でも、待機中の編集を含めて退避する。
           }
           if (mergedRev !== undefined) {
             this.state.setRev(path, mergedRev);
             await this.state.save();
+            acceptedBody = mergedBody;
             return;
           }
+          const latestBody = await this.vault.read(path);
+          if (latestBody !== mergedBody) localBody = latestBody;
           // この後のコピー作成や送信が失敗しても、原文を原本に残す。
-          await this.vault.write(path, localBody);
+          if (latestBody !== localBody) await this.vault.write(path, localBody);
         }
       }
 
-      const copyPath = conflictCopyPath(path, this.options.deviceName, new Date());
-      let copy = copyPath;
-      for (let suffix = 2; await this.vault.exists(copy); suffix++) {
-        copy = copyPath.replace(/(\.md)$/i, ` ${suffix}$1`);
+      let copy: string;
+      for (;;) {
+        localBody = await this.vault.read(path);
+        const copyPath = conflictCopyPath(path, this.options.deviceName, new Date());
+        copy = copyPath;
+        for (let suffix = 2; await this.vault.exists(copy); suffix++) {
+          copy = copyPath.replace(/(\.md)$/i, ` ${suffix}$1`);
+        }
+        await this.applyRemote(copy, async () => this.vault.write(copy, localBody));
+        const pushed = await this.client.pushNote({
+          path: copy,
+          baseRev: null,
+          mtime: Date.now(),
+          body: localBody,
+          index: this.vault.indexOf(copy) ?? undefined,
+        });
+        if (pushed.status === "conflict")
+          throw new Error(`Conflict copy ${copy} could not be synced.`);
+        this.state.setRev(copy, pushed.rev);
+        // コピーの送信待ち中にも編集できるので、未退避の本文を上書きしない。
+        if ((await this.vault.read(path)) === localBody) break;
       }
-      await this.applyRemote(copy, async () => this.vault.write(copy, localBody));
-      const pushed = await this.client.pushNote({
-        path: copy,
-        baseRev: null,
-        mtime: Date.now(),
-        body: localBody,
-        index: this.vault.indexOf(copy) ?? undefined,
-      });
-      if (pushed.status === "conflict")
-        throw new Error(`Conflict copy ${copy} could not be synced.`);
       if (outcome.body === null) await this.vault.remove(path);
       else await this.vault.write(path, outcome.body);
-      this.state.setRev(copy, pushed.rev);
       this.state.setRev(path, outcome.body === null ? null : outcome.rev);
       await this.state.save();
       this.notice(`Conflict on ${path}. Your version was kept as ${copy}.`);
+      acceptedBody = outcome.body;
     });
+    if (acceptedBody !== undefined) {
+      const latestBody = (await this.vault.exists(path)) ? await this.vault.read(path) : null;
+      if (latestBody !== acceptedBody) await this.pushPath(path);
+    }
   }
 
   /** 添付はテキストではないので競合コピーを作らずリモートを採用する。 */

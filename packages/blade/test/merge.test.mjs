@@ -14,6 +14,11 @@ test("preserves CRLF line endings", () => {
   assert.equal(mergeNote("左\r\nB\r\n", "A\r\nB\r\n", "A\r\n右\r\n"), "左\r\n右\r\n");
 });
 
+test("preserves mixed bare CR and LF line endings", () => {
+  assert.equal(mergeNote("左\rB\n", "A\rB\n", "左\rB\n"), "左\rB\n");
+  assert.equal(mergeNote("左\rB\n", "A\rB\n", "A\r右\n"), "左\r右\n");
+});
+
 test("preserves missing trailing newline", () => {
   assert.equal(mergeNote("左\nB", "A\nB", "A\n右"), "左\n右");
 });

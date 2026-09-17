@@ -60,8 +60,44 @@ export class VaultDO extends DurableObject<Env> {
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     // hibernation から復帰するたび constructor が走るため、ここは冪等でなければならない。
-    for (const statement of SCHEMA) ctx.storage.sql.exec(statement);
-    ctx.storage.sql.exec(BACKFILL_VERSIONS_SQL, Date.now() - HISTORY_RETENTION_MS);
+    void ctx.blockConcurrencyWhile(async () => {
+      for (const statement of SCHEMA) this.sql.exec(statement);
+      // purge 済みの履歴を tombstone から再生成しない。失敗した移行だけ再試行する。
+      if (this.readMeta("history_backfilled_at")) return;
+      const cutoff = Date.now() - HISTORY_RETENTION_MS;
+      this.sql.exec(BACKFILL_VERSIONS_SQL, cutoff);
+      const deletedNotes = [
+        ...this.sql.exec<{
+          path: string;
+          body: string;
+          mtime: number;
+          seq: number;
+          updated_at: number;
+        }>(
+          `SELECT f.path, n.body, f.mtime, f.seq, f.updated_at FROM files f
+           JOIN notes n ON n.path = f.path
+           WHERE f.deleted = 1 AND f.kind = 'note' AND f.deleted_at >= ? AND f.updated_at >= ?`,
+          cutoff,
+          cutoff,
+        ),
+      ];
+      // tombstone の rev は本文を指さない。添付は元の hash を証明できないため移行しない。
+      for (const note of deletedNotes) {
+        const rev = await contentHash(note.body);
+        this.sql.exec(
+          `INSERT OR IGNORE INTO versions(path, rev, kind, body, size, mtime, seq, created_at)
+           VALUES (?, ?, 'note', ?, ?, ?, ?, ?)`,
+          note.path,
+          rev,
+          note.body,
+          note.body.length,
+          note.mtime,
+          note.seq,
+          note.updated_at,
+        );
+      }
+      this.writeMeta("history_backfilled_at", Date.now());
+    });
     // keepalive を自前で処理すると毎回 DO が起きて hibernation が無意味になる。
     ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair("ping", "pong"));
   }
@@ -203,8 +239,9 @@ export class VaultDO extends DurableObject<Env> {
     return [
       ...this.sql.exec<VersionMetadata>(
         `SELECT path, rev, kind, size, mtime, seq, created_at FROM versions
-         WHERE path = ? ORDER BY created_at DESC, seq DESC`,
+         WHERE path = ? AND created_at >= ? ORDER BY created_at DESC, seq DESC`,
         path,
+        Date.now() - HISTORY_RETENTION_MS,
       ),
     ];
   }
@@ -213,9 +250,10 @@ export class VaultDO extends DurableObject<Env> {
     const [row] = [
       ...this.sql.exec<VersionRecord>(
         `SELECT path, rev, kind, body, size, mtime, seq, created_at FROM versions
-         WHERE path = ? AND rev = ?`,
+         WHERE path = ? AND rev = ? AND created_at >= ?`,
         path,
         rev,
+        Date.now() - HISTORY_RETENTION_MS,
       ),
     ];
     return row ?? null;
@@ -223,7 +261,12 @@ export class VaultDO extends DurableObject<Env> {
 
   async restoreVersion(path: string, rev: string): Promise<PushResult | null> {
     const version = await this.version(path, rev);
-    if (!version || (version.kind === "note" && version.body === null)) return null;
+    if (
+      !version ||
+      (version.kind === "note" &&
+        (version.body === null || (await contentHash(version.body)) !== version.rev))
+    )
+      return null;
     const current = await this.head(path);
     return this.push({
       path,
@@ -463,6 +506,7 @@ export class VaultDO extends DurableObject<Env> {
     // deleteAll はスキーマごと消す。この DO はまだメモリに残っているので、
     // 張り直さないと次のクエリが「テーブルが無い」で落ちる。
     for (const statement of SCHEMA) this.sql.exec(statement);
+    this.writeMeta("history_backfilled_at", Date.now());
     return { files: row.n };
   }
 
