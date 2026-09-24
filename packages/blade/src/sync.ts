@@ -96,6 +96,10 @@ export function conflictCopyPath(path: string, deviceName: string, at: Date): st
 export class SyncEngine {
   /** リモートを適用している最中の path。自分の書き込みを変更検知が拾って押し返すのを防ぐ。 */
   private applying = new Set<string>();
+  // ponytail: Vault全体を直列化する。並列化が必要ならpath処理とseq順序の制御を分ける。
+  private syncing = false;
+  private pendingPushes = new Set<string>();
+  private pendingPull = false;
 
   constructor(
     private readonly client: MicrolithClient,
@@ -115,6 +119,40 @@ export class SyncEngine {
   async pushPath(path: string): Promise<void> {
     if (isExcluded(path, this.options.syncAllFileTypes)) return;
     if (this.applying.has(path)) return;
+    this.pendingPushes.add(path);
+    await this.syncPending();
+  }
+
+  async pull(): Promise<number> {
+    this.pendingPull = true;
+    return this.syncPending();
+  }
+
+  private async syncPending(): Promise<number> {
+    // 通知は処理中にも届く。再入を待つと pull → push の競合待機で停止する。
+    if (this.syncing) return 0;
+    this.syncing = true;
+    let applied = 0;
+    try {
+      while (this.pendingPull || this.pendingPushes.size > 0) {
+        if (this.pendingPull) {
+          this.pendingPull = false;
+          applied += await this.pullChanges();
+        } else {
+          for (const path of this.pendingPushes) {
+            await this.push(path);
+            break;
+          }
+        }
+      }
+      return applied;
+    } finally {
+      this.syncing = false;
+    }
+  }
+
+  private async push(path: string): Promise<void> {
+    this.pendingPushes.delete(path);
     if (!(await this.vault.exists(path))) return this.pushDeletion(path);
 
     const baseRev = this.state.revOf(path);
@@ -240,7 +278,7 @@ export class SyncEngine {
     });
     if (acceptedBody !== undefined) {
       const latestBody = (await this.vault.exists(path)) ? await this.vault.read(path) : null;
-      if (latestBody !== acceptedBody) await this.pushPath(path);
+      if (latestBody !== acceptedBody) await this.push(path);
     }
   }
 
@@ -262,7 +300,7 @@ export class SyncEngine {
     }
   }
 
-  async pull(): Promise<number> {
+  private async pullChanges(): Promise<number> {
     let applied = 0;
     for (;;) {
       const result = await this.client.changes(this.state.lastSeq);
@@ -310,9 +348,9 @@ export class SyncEngine {
         return false;
       }
       // ローカルの編集を削除で消さない。push 側に回せば競合コピーとして残る。
-      if (diverged) {
+      if (diverged || this.pendingPushes.has(change.path)) {
         if (change.kind !== "note") return false;
-        await this.pushPath(change.path);
+        await this.push(change.path);
         return true;
       }
       await this.applyRemote(change.path, () => this.vault.remove(change.path));
@@ -322,10 +360,14 @@ export class SyncEngine {
 
     if (change.kind === "note") {
       if (diverged) {
-        await this.pushPath(change.path);
+        await this.push(change.path);
         return true;
       }
       const note = await this.client.readNote(change.path);
+      if (this.pendingPushes.has(change.path)) {
+        await this.push(change.path);
+        return true;
+      }
       await this.applyRemote(change.path, () => this.vault.write(change.path, note.body));
       this.state.setRev(change.path, note.rev);
     } else {
@@ -346,7 +388,7 @@ export class SyncEngine {
     // ローカルから消えたまま削除を送れていない path を拾う
     const present = new Set(await this.vault.list());
     for (const tracked of this.state.paths()) {
-      if (!present.has(tracked)) await this.pushDeletion(tracked);
+      if (!present.has(tracked)) await this.pushPath(tracked);
     }
   }
 }

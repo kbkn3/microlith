@@ -12,6 +12,10 @@ vi.mock("obsidian", () => {
     loadData() {
       return Promise.resolve(this.storedData);
     }
+
+    async saveData(data) {
+      this.storedData = data;
+    }
   }
 
   class PluginSettingTab {
@@ -35,22 +39,24 @@ vi.mock("obsidian", () => {
     Setting: class {},
     TFile,
     debounce: (callback) => callback,
-    requestUrl: () => {
+    requestUrl: vi.fn(() => {
       throw new Error("not used");
-    },
+    }),
   };
 });
 
 const { default: MicrolithPlugin } = await import("../src/main.ts");
-const { TFile } = await import("obsidian");
+const { TFile, requestUrl } = await import("obsidian");
 
 afterEach(() => {
   vi.useRealTimers();
+  vi.clearAllMocks();
   delete globalThis.window;
 });
 
 function makePlugin(modify, initialBody = "") {
   const file = new TFile("note.md");
+  const copies = new Map();
   let storedBody = initialBody;
   const operations = [];
   let changed;
@@ -74,7 +80,14 @@ function makePlugin(modify, initialBody = "") {
     getFirstLinkpathDest: () => null,
   };
   const vault = {
-    getAbstractFileByPath: (path) => (path === file.path ? file : null),
+    getAbstractFileByPath: (path) =>
+      path === file.path ? file : copies.has(path) ? new TFile(path) : null,
+    read: async (target) => (target.path === file.path ? storedBody : copies.get(target.path)),
+    create: async (path, body) => {
+      if (path === file.path || copies.has(path)) throw new Error("file already exists");
+      copies.set(path, body);
+      return new TFile(path);
+    },
     modify: (target, body) => {
       operations.push("write");
       storedBody = body;
@@ -97,6 +110,8 @@ function makePlugin(modify, initialBody = "") {
     fileManager: {},
   });
   return {
+    plugin,
+    copies,
     adapter: plugin.adapter(),
     emitRegistered: (...arguments_) => registeredChanged?.(...arguments_),
     file,
@@ -198,3 +213,58 @@ test("old stored data keeps automatic merge enabled", async () => {
 
   assert.equal(plugin.getConfiguration().automaticMerge, true);
 });
+
+for (const [timing, automaticMerge] of [
+  ["起動後", false],
+  ["起動後", true],
+  ["起動前", false],
+  ["起動前", true],
+]) {
+  test(`${timing}の automaticMerge=${automaticMerge} が次の競合へ即時反映される`, async () => {
+    globalThis.window = globalThis;
+    const localBody = "local\nsecond\n";
+    const context = makePlugin(({ body, emit }) => emit(context.file, body, {}), localBody);
+    const { plugin } = context;
+    plugin.storedData = {
+      endpoint: "https://example.test",
+      token: "test",
+      deviceName: "phone",
+      automaticMerge: !automaticMerge,
+      state: { lastSeq: 4, revs: { "note.md": "base-revision" } },
+    };
+    await plugin.onload();
+    plugin.registerVaultEvents = () => {};
+    plugin.connect = () => {};
+    plugin.syncNow = async () => {};
+    if (timing === "起動後") await plugin.start();
+    await plugin.updateConfiguration({ automaticMerge });
+    await plugin.updateConfiguration({ deviceName: "updated-device" });
+    if (timing === "起動前") await plugin.start();
+    const requests = [];
+    requestUrl.mockImplementation(async ({ body }) => {
+      const input = JSON.parse(body);
+      requests.push(input);
+      const conflict = requests.length === 1;
+      return {
+        status: conflict ? 409 : 200,
+        headers: {},
+        json: conflict
+          ? {
+              status: "conflict",
+              rev: "remote-revision",
+              body: "first\nremote\n",
+              baseBody: "first\nsecond\n",
+            }
+          : { status: "ok", rev: "accepted-revision", seq: 2 },
+      };
+    });
+    await plugin.engine.pushPath("note.md");
+    assert.equal(context.read(), automaticMerge ? "local\nremote\n" : "first\nremote\n");
+    assert.equal(context.copies.size, automaticMerge ? 0 : 1);
+    assert.equal(requests[0].baseRev, "base-revision");
+    assert.equal(requests[1].body, automaticMerge ? "local\nremote\n" : localBody);
+    assert.equal(plugin.storedData.automaticMerge, automaticMerge);
+    assert.equal(plugin.storedData.deviceName, "updated-device");
+    assert.equal(plugin.storedData.state.lastSeq, 4);
+  });
+}

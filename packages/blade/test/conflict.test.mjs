@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "vite-plus/test";
+import { contentHash } from "@microlith/haft";
 import { SyncEngine, conflictCopyPath } from "../src/sync.ts";
 
 const baseBody = "first\nsecond\n";
@@ -121,7 +122,7 @@ function fixture(configuration = {}) {
     deviceName: "phone",
     automaticMerge: configuration.automaticMerge,
   });
-  return { engine, files, state, requests, operations, writes };
+  return { engine, files, state, client, requests, operations, writes };
 }
 
 function assertFallback(context, body = remoteBody, revision = "remote-revision") {
@@ -153,6 +154,108 @@ test("別行の競合を exact-body index と最新 revision で一度だけ再�
   assert.deepEqual([...context.files], [["note.md", mergedBody]]);
   assert.equal(context.state.revOf("note.md"), "merged-revision");
   assert.equal(context.engine.isApplying("note.md"), false);
+});
+
+test("競合待機中の pull を完了後に処理して最新 remote へ収束する", async () => {
+  const newerBody = "first\nremote changed again\n";
+  const newerRevision = await contentHash(newerBody);
+  let deferredSequence;
+  const context = fixture({
+    outcome: { rev: await contentHash(remoteBody) },
+    missingIndex: true,
+    duringIndex: async ({ engine }) => {
+      context.client.changes = async (since) => ({
+        status: "ok",
+        seq: 10,
+        hasMore: false,
+        changes:
+          since < 10 ? [{ path: "note.md", rev: newerRevision, kind: "note", deleted: false }] : [],
+      });
+      context.client.readNote = async () => ({ rev: newerRevision, body: newerBody });
+      await engine.pull();
+      deferredSequence = context.state.lastSeq;
+    },
+  });
+  await context.engine.pushPath("note.md");
+  assert.equal(context.files.get("note.md"), newerBody);
+  assert.equal(context.state.revOf("note.md"), newerRevision);
+  assert.equal(context.state.lastSeq, 10);
+  assert.equal(deferredSequence, 0, "未適用の変更へカーソルを進めない");
+  assert.ok([...context.files.values()].includes(localBody));
+  await context.engine.pull();
+  assert.equal(context.files.get("note.md"), newerBody);
+});
+
+for (const deleted of [false, true]) {
+  test(`pull の${deleted ? "削除確認" : "本文取得"}中に保留された編集を失わない`, async () => {
+    const editedBody = "edit queued during pull\n";
+    let existenceChecks = 0;
+    const context = fixture({
+      automaticMerge: false,
+      outcome: { body: deleted ? null : remoteBody },
+      duringExists: async ({ path, files }) => {
+        if (!deleted || path !== "note.md" || ++existenceChecks !== 2) return;
+        files.set(path, editedBody);
+        await context.engine.pushPath(path);
+      },
+    });
+    context.state.setRev("note.md", await contentHash(localBody));
+    context.client.readNote = async () => {
+      context.files.set("note.md", editedBody);
+      await context.engine.pushPath("note.md");
+      return { rev: "remote-revision", body: remoteBody };
+    };
+    await context.engine.pull();
+    assert.ok([...context.files.values()].includes(editedBody), "保留中の編集が消えた");
+    assert.ok(context.requests.some(({ body }) => body === editedBody));
+  });
+}
+
+test("並行する pull は取得と適用の順序を保ち lastSeq を逆行させない", async () => {
+  const context = fixture();
+  const cursors = [];
+  let release;
+  let entered;
+  const pending = new Promise((resolve) => {
+    release = resolve;
+  });
+  const started = new Promise((resolve) => {
+    entered = resolve;
+  });
+  context.client.changes = async (since) => {
+    cursors.push(since);
+    if (cursors.length === 1) {
+      entered();
+      await pending;
+      return { status: "ok", seq: 10, hasMore: false, changes: [] };
+    }
+    return { status: "ok", seq: 20, hasMore: false, changes: [] };
+  };
+  const first = context.engine.pull();
+  await started;
+  await context.engine.pull();
+  release();
+  await first;
+  assert.deepEqual(cursors, [0, 10]);
+  assert.equal(context.state.lastSeq, 20);
+});
+
+test("pull が失敗しても未適用 seq を保存せず次の同期を停止させない", async () => {
+  const context = fixture();
+  const cursors = [];
+  context.client.changes = async (since) => {
+    cursors.push(since);
+    if (cursors.length === 1) {
+      await context.engine.pull();
+      throw new Error("offline");
+    }
+    return { status: "ok", seq: 7, hasMore: false, changes: [] };
+  };
+  await assert.rejects(context.engine.pull(), /offline/);
+  assert.equal(context.state.lastSeq, 0);
+  await context.engine.pull();
+  assert.deepEqual(cursors, [0, 0]);
+  assert.equal(context.state.lastSeq, 7);
 });
 
 test("metadata timeout 後の3回目の read 待機中の編集を失わない", async () => {

@@ -105,10 +105,13 @@ export default class MicrolithPlugin extends Plugin {
       this.configuration.token,
       obsidianHttp,
     );
+    const isAutomaticMergeEnabled = () => this.configuration.automaticMerge;
     this.engine = new SyncEngine(client, this.adapter(), state, {
       deviceName: this.configuration.deviceName,
       syncAllFileTypes: this.configuration.syncAllFileTypes,
-      automaticMerge: this.configuration.automaticMerge,
+      get automaticMerge() {
+        return isAutomaticMergeEnabled();
+      },
       onNotice: (message) => new Notice(`Microlith: ${message}`),
     });
 
