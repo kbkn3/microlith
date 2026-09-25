@@ -151,7 +151,7 @@ export class SyncEngine {
     }
   }
 
-  private async push(path: string): Promise<void> {
+  private async push(path: string): Promise<boolean> {
     this.pendingPushes.delete(path);
     if (!(await this.vault.exists(path))) return this.pushDeletion(path);
 
@@ -163,12 +163,16 @@ export class SyncEngine {
       if (data.byteLength > MAX_ASSET_BYTES) {
         // 分割アップロードは作っていない(§2-4)。黙って落とすと同期漏れに気づけない。
         this.notice(`${path} is larger than 100 MB and was not synced.`);
-        return;
+        return false;
       }
       const outcome = await this.client.pushAsset({ path, baseRev, mtime, data });
-      if (outcome.status === "conflict") return this.resolveAssetConflict(path, outcome.rev);
+      if (outcome.status === "conflict") {
+        await this.resolveAssetConflict(path, outcome.rev);
+        return true;
+      }
       this.state.setRev(path, outcome.rev);
-      return this.state.save();
+      await this.state.save();
+      return true;
     }
 
     const body = await this.vault.read(path);
@@ -182,20 +186,22 @@ export class SyncEngine {
     if (outcome.status === "conflict") return this.resolveNoteConflict(path, outcome);
     this.state.setRev(path, outcome.rev);
     await this.state.save();
+    return true;
   }
 
-  private async pushDeletion(path: string): Promise<void> {
+  private async pushDeletion(path: string): Promise<boolean> {
     const baseRev = this.state.revOf(path);
-    if (!baseRev) return;
+    if (!baseRev) return false;
     const outcome = await this.client.pushNote({ path, baseRev, mtime: Date.now(), deleted: true });
     if (outcome.status !== "conflict") this.state.setRev(path, null);
     await this.state.save();
+    return outcome.status !== "conflict";
   }
 
   private async resolveNoteConflict(
     path: string,
     outcome: { rev: string; body: string | null; baseBody?: string },
-  ): Promise<void> {
+  ): Promise<boolean> {
     let acceptedBody: string | null | undefined;
     await this.applyRemote(path, async () => {
       let localBody = await this.vault.read(path);
@@ -278,8 +284,9 @@ export class SyncEngine {
     });
     if (acceptedBody !== undefined) {
       const latestBody = (await this.vault.exists(path)) ? await this.vault.read(path) : null;
-      if (latestBody !== acceptedBody) await this.push(path);
+      if (latestBody !== acceptedBody) return this.push(path);
     }
+    return true;
   }
 
   /** 添付はテキストではないので競合コピーを作らずリモートを採用する。 */
@@ -350,8 +357,7 @@ export class SyncEngine {
       // ローカルの編集を削除で消さない。push 側に回せば競合コピーとして残る。
       if (diverged || this.pendingPushes.has(change.path)) {
         if (change.kind !== "note") return false;
-        await this.push(change.path);
-        return true;
+        return (await this.push(change.path)) ? true : this.applyChange(change);
       }
       await this.applyRemote(change.path, () => this.vault.remove(change.path));
       this.state.setRev(change.path, null);
@@ -359,14 +365,10 @@ export class SyncEngine {
     }
 
     if (change.kind === "note") {
-      if (diverged) {
-        await this.push(change.path);
-        return true;
-      }
+      if (diverged && (await this.push(change.path))) return true;
       const note = await this.client.readNote(change.path);
-      if (this.pendingPushes.has(change.path)) {
-        await this.push(change.path);
-        return true;
+      while (this.pendingPushes.has(change.path)) {
+        if (await this.push(change.path)) return true;
       }
       await this.applyRemote(change.path, () => this.vault.write(change.path, note.body));
       this.state.setRev(change.path, note.rev);

@@ -211,6 +211,79 @@ for (const deleted of [false, true]) {
   });
 }
 
+test("pull の本文取得中に保留された削除が拒否されても remote 本文へ収束する", async () => {
+  const revision = await contentHash(remoteBody);
+  const localRevision = await contentHash(localBody);
+  const context = fixture({ automaticMerge: false, outcome: { rev: revision } });
+  context.state.setRev("note.md", localRevision);
+  context.client.changes = async (since) => ({
+    status: "ok",
+    seq: 10,
+    hasMore: false,
+    changes: since < 10 ? [{ path: "note.md", rev: revision, kind: "note", deleted: false }] : [],
+  });
+  context.client.readNote = async () => {
+    context.files.delete("note.md");
+    await context.engine.pushPath("note.md");
+    assert.equal(context.state.lastSeq, 0, "未適用の変更へカーソルを進めない");
+    return { rev: revision, body: remoteBody };
+  };
+  const pushNote = context.client.pushNote.bind(context.client);
+  const deletionOutcomes = [];
+  context.client.pushNote = async (input) => {
+    assert.equal(context.state.lastSeq, 0, "削除要求の完了前にカーソルを進めない");
+    const outcome = await pushNote(input);
+    deletionOutcomes.push(outcome.status);
+    return outcome;
+  };
+  const save = context.state.save;
+  context.state.save = async () => {
+    if (context.state.lastSeq === 10) {
+      assert.equal(context.files.get("note.md"), remoteBody, "未適用の本文を受信済みにしない");
+      assert.equal(context.state.revOf("note.md"), revision);
+    }
+    await save();
+  };
+  await context.engine.pull();
+  assert.equal(context.files.get("note.md"), remoteBody);
+  assert.equal(context.state.revOf("note.md"), revision);
+  assert.equal(context.state.lastSeq, 10);
+  assert.deepEqual(deletionOutcomes, ["conflict"]);
+  assert.deepEqual(
+    context.requests.map(({ path, baseRev, deleted }) => ({ path, baseRev, deleted })),
+    [{ path: "note.md", baseRev: localRevision, deleted: true }],
+  );
+  await context.engine.pull();
+  assert.equal(context.files.get("note.md"), remoteBody);
+  assert.equal(context.state.revOf("note.md"), revision);
+  assert.equal(context.state.lastSeq, 10);
+  assert.equal(context.requests.length, 1, "拒否された削除を新 revision で再送しない");
+});
+
+test("保留された削除の拒否を待つ間に再作成された本文を失わない", async () => {
+  const editedBody = "recreated while deletion is pending\n";
+  const context = fixture({ automaticMerge: false });
+  context.state.setRev("note.md", await contentHash(localBody));
+  context.client.readNote = async () => {
+    context.files.delete("note.md");
+    await context.engine.pushPath("note.md");
+    return { rev: "remote-revision", body: remoteBody };
+  };
+  const pushNote = context.client.pushNote.bind(context.client);
+  context.client.pushNote = async (input) => {
+    const outcome = await pushNote(input);
+    if (input.deleted) {
+      context.files.set("note.md", editedBody);
+      await context.engine.pushPath("note.md");
+    }
+    return outcome;
+  };
+  await context.engine.pull();
+  assert.ok([...context.files.values()].includes(editedBody), "再作成された本文が消えた");
+  assert.ok(context.requests.some(({ body }) => body === editedBody));
+  assert.equal(context.requests.filter(({ deleted }) => deleted).length, 1);
+});
+
 test("並行する pull は取得と適用の順序を保ち lastSeq を逆行させない", async () => {
   const context = fixture();
   const cursors = [];
