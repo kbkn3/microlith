@@ -10,7 +10,6 @@ export interface VaultAdapter {
   list(): Promise<string[]>;
   read(path: string): Promise<string>;
   readBinary(path: string): Promise<ArrayBuffer>;
-  write(path: string, body: string): Promise<void>;
   create(path: string, body: string): Promise<void>;
   /** 比較と置換を原子的に行う。read/write を分けると待機中の編集を失う。 */
   replaceIfUnchanged(path: string, expectedBody: string, body: string): Promise<boolean>;
@@ -325,18 +324,16 @@ export class SyncEngine {
     return applied;
   }
 
-  /** ローカルの実体から rev を計算する。無ければ null。 */
-  private async localRev(path: string, kind: "note" | "asset"): Promise<string | null> {
-    if (!(await this.vault.exists(path))) return null;
-    const body = kind === "note" ? await this.vault.read(path) : await this.vault.readBinary(path);
-    return contentHash(body);
-  }
-
   private async applyChange(change: Change): Promise<boolean> {
     if (isExcluded(change.path, this.options.syncAllFileTypes)) return false;
     if (this.state.revOf(change.path) === change.rev) return false;
 
-    const local = await this.localRev(change.path, change.kind);
+    const snapshot = (await this.vault.exists(change.path))
+      ? change.kind === "note"
+        ? await this.vault.read(change.path)
+        : await this.vault.readBinary(change.path)
+      : null;
+    const local = snapshot === null ? null : await contentHash(snapshot);
 
     // 手元が既にリモートと同一なら、rev を覚えるだけでよい。
     // 同じ Vault をコピーした端末に入れたときに、全ファイルが競合になるのを防ぐ。
@@ -365,12 +362,31 @@ export class SyncEngine {
     }
 
     if (change.kind === "note") {
-      if (diverged && (await this.push(change.path))) return true;
-      const note = await this.client.readNote(change.path);
-      while (this.pendingPushes.has(change.path)) {
+      let expectedBody = typeof snapshot === "string" ? snapshot : null;
+      if (diverged) {
         if (await this.push(change.path)) return true;
+        expectedBody = null;
       }
-      await this.applyRemote(change.path, () => this.vault.write(change.path, note.body));
+      const note = await this.client.readNote(change.path);
+      for (;;) {
+        let applied = false;
+        await this.applyRemote(change.path, async () => {
+          if (expectedBody !== null) {
+            applied = await this.vault.replaceIfUnchanged(change.path, expectedBody, note.body);
+          } else {
+            try {
+              await this.vault.create(change.path, note.body);
+              applied = true;
+            } catch (error) {
+              if (!(await this.vault.exists(change.path))) throw error;
+            }
+          }
+        });
+        if (applied) break;
+        if (await this.push(change.path)) return true;
+        // 削除が拒否された後も、再作成された本文は create の排他性で保護する。
+        expectedBody = null;
+      }
       this.state.setRev(change.path, note.rev);
     } else {
       const data = await this.client.readAsset(change.path);

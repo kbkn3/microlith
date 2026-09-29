@@ -51,6 +51,8 @@ function fixture(configuration = {}) {
       files.delete(path);
     },
     async create(path, body) {
+      await configuration.duringCreate?.({ path, files });
+      if (configuration.createThrows) throw new Error("create failed");
       if (files.has(path)) throw new Error(`${path} already exists`);
       await vault.write(path, body);
     },
@@ -282,6 +284,71 @@ test("保留された削除の拒否を待つ間に再作成された本文を�
   assert.ok([...context.files.values()].includes(editedBody), "再作成された本文が消えた");
   assert.ok(context.requests.some(({ body }) => body === editedBody));
   assert.equal(context.requests.filter(({ deleted }) => deleted).length, 1);
+});
+
+for (const exists of [true, false]) {
+  test(`通常 pull の本文取得中の未通知${exists ? "編集" : "新規作成"}を保持する`, async () => {
+    const editedBody = "user edit while remote body is loading\n";
+    const revision = await contentHash(remoteBody);
+    const context = fixture({ automaticMerge: false, outcome: { rev: revision } });
+    if (!exists) context.files.delete("note.md");
+    context.state.setRev("note.md", exists ? await contentHash(localBody) : null);
+    context.client.changes = async (since) => ({
+      status: "ok",
+      seq: 10,
+      hasMore: false,
+      changes: since < 10 ? [{ path: "note.md", rev: revision, kind: "note", deleted: false }] : [],
+    });
+    context.client.readNote = async () => {
+      context.files.set("note.md", editedBody);
+      return { rev: revision, body: remoteBody };
+    };
+    await context.engine.pull();
+    assert.ok([...context.files.values()].includes(editedBody), "未通知の本文が消えた");
+    assert.ok(context.requests.some(({ body }) => body === editedBody));
+    assert.equal(context.files.get("note.md"), remoteBody);
+    assert.equal(context.state.revOf("note.md"), revision);
+    assert.equal(context.state.lastSeq, 10);
+    await context.engine.pushPath("note.md");
+    assert.ok([...context.files.values()].includes(editedBody));
+  });
+}
+
+test("pull の snapshot 読込中の削除が拒否されても一度の送信で remote へ収束する", async () => {
+  const context = fixture({
+    duringRead: ({ files, reads }) => {
+      if (reads === 1) files.delete("note.md");
+    },
+  });
+  await context.engine.pull();
+  assert.equal(context.files.get("note.md"), remoteBody);
+  assert.equal(context.state.revOf("note.md"), "remote-revision");
+  assert.equal(context.requests.filter(({ deleted }) => deleted).length, 1);
+});
+
+test("pull の create と競合した未通知の新規本文を保持する", async () => {
+  const editedBody = "created at the atomic write boundary\n";
+  const context = fixture({
+    automaticMerge: false,
+    duringCreate: ({ path, files }) => {
+      if (path === "note.md") files.set(path, editedBody);
+    },
+  });
+  context.files.delete("note.md");
+  context.state.setRev("note.md", null);
+  await context.engine.pull();
+  assert.ok([...context.files.values()].includes(editedBody));
+  assert.ok(context.requests.some(({ body }) => body === editedBody));
+  assert.equal(context.files.get("note.md"), remoteBody);
+});
+
+test("pull の create が失敗したら未適用の revision と seq を保存しない", async () => {
+  const context = fixture({ createThrows: true });
+  context.files.delete("note.md");
+  context.state.setRev("note.md", null);
+  await assert.rejects(context.engine.pull(), /create failed/);
+  assert.equal(context.state.revOf("note.md"), null);
+  assert.equal(context.state.lastSeq, 0);
 });
 
 test("並行する pull は取得と適用の順序を保ち lastSeq を逆行させない", async () => {

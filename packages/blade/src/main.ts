@@ -190,11 +190,6 @@ export default class MicrolithPlugin extends Plugin {
       const file = vault.getAbstractFileByPath(path);
       return file instanceof TFile ? file : null;
     };
-    const write = async (path: string, body: string): Promise<void> => {
-      const file = fileAt(path);
-      if (file) await vault.modify(file, body);
-      else await vault.create(path, body);
-    };
     const replaceIfUnchanged = async (
       path: string,
       expectedBody: string,
@@ -243,7 +238,6 @@ export default class MicrolithPlugin extends Plugin {
         if (!file) throw new Error(`missing ${path}`);
         return vault.readBinary(file);
       },
-      write,
       create: async (path, body) => {
         await vault.create(path, body);
       },

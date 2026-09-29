@@ -71,8 +71,8 @@ function setup() {
       elements.get("secret").value = "test-admin";
       await elements.get("connect").onclick();
     },
-    load: () => runInContext('loadHistory("note.md")', context),
-    buttons: () => elements.get("history").children[0].children[2].children,
+    load: (path = "note.md") => runInContext(`loadHistory(${JSON.stringify(path)})`, context),
+    buttons: (row = 0) => elements.get("history").children[row].children[2].children,
   };
   runInContext(script, context);
   return fixture;
@@ -120,6 +120,51 @@ for (const action of ["versions", "version", "restore"]) {
     assert.equal(fixture.elements.get("connection-note").textContent, "Connected to vault-b.");
   });
 }
+
+for (const action of ["versions", "version"]) {
+  test(`late ${action} response cannot replace another path in the same vault`, async () => {
+    const fixture = setup();
+    await fixture.connect("vault-a");
+    await fixture.load("a.md");
+    const pending = Promise.withResolvers();
+    const respond = fixture.respond;
+    fixture.respond = (requested, url) =>
+      requested === action && url.searchParams.get("path") === "a.md"
+        ? pending.promise
+        : respond(requested);
+    const request = action === "versions" ? fixture.load("a.md") : fixture.buttons()[0].onclick();
+    await fixture.load("b.md");
+    pending.resolve(action === "versions" ? { versions: [] } : { ...version, body: "a body" });
+    await request;
+    assert.equal(fixture.elements.get("history").children.length, 1);
+    assert.equal(fixture.elements.get("history-preview").hidden, true);
+    await fixture.buttons()[1].onclick();
+    const restored = fixture.requests.find(({ method }) => method === "POST");
+    assert.equal(restored.url.searchParams.get("path"), "b.md");
+  });
+}
+
+test("late preview cannot replace the latest revision selection", async () => {
+  const fixture = setup();
+  await fixture.connect("vault-a");
+  const pending = Promise.withResolvers();
+  const respond = fixture.respond;
+  fixture.respond = (action, url) => {
+    if (action === "versions") return { versions: [version, { ...version, rev: "newer" }] };
+    if (action === "version")
+      return url.searchParams.get("rev") === "retained"
+        ? pending.promise
+        : { ...version, rev: "newer", body: "newer body" };
+    return respond(action);
+  };
+  await fixture.load();
+  const first = fixture.buttons()[0].onclick();
+  await fixture.buttons(1)[0].onclick();
+  pending.resolve({ ...version, body: "older body" });
+  await first;
+  assert.equal(fixture.elements.get("history-preview").textContent, "newer body");
+  assert.equal(fixture.elements.get("history-preview").hidden, false);
+});
 
 test("history restore names its vault and keeps the selected path", async () => {
   const fixture = setup();
