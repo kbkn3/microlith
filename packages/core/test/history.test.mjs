@@ -333,6 +333,49 @@ test("a reused destroyed vault does not backfill expired deleted history on rest
   assert.equal((await migrated.restore("note.md")).rev, accepted.rev);
 });
 
+test("returning to an earlier body refreshes its history entry so purge keeps it", async () => {
+  const now = Date.now();
+  const clock = vi.spyOn(Date, "now").mockReturnValue(now);
+  const { vault } = await createVault();
+  const first = await vault.push({
+    path: "note.md",
+    kind: "note",
+    baseRev: null,
+    mtime: 1,
+    body: "A",
+  });
+  const second = await vault.push({
+    path: "note.md",
+    kind: "note",
+    baseRev: first.rev,
+    mtime: 2,
+    body: "B",
+  });
+  clock.mockReturnValue(now + HISTORY_RETENTION_MS - 1);
+  const returned = await vault.push({
+    path: "note.md",
+    kind: "note",
+    baseRev: second.rev,
+    mtime: 3,
+    body: "A",
+  });
+  assert.equal(returned.rev, first.rev);
+  assert.deepEqual(
+    (await vault.versions("note.md")).map(({ rev, seq }) => ({ rev, seq })),
+    [
+      { rev: returned.rev, seq: 3 },
+      { rev: second.rev, seq: 2 },
+    ],
+  );
+  clock.mockReturnValue(now + HISTORY_RETENTION_MS + 1);
+  await vault.push({ path: "other.md", kind: "note", baseRev: null, mtime: 4, body: "purge" });
+  assert.deepEqual(
+    (await vault.versions("note.md")).map(({ rev }) => rev),
+    [returned.rev],
+  );
+  assert.equal((await vault.version("note.md", returned.rev))?.body, "A");
+});
+
 test("conflict baseBody preserves an empty base and omits an unavailable base", async () => {
   const { vault } = await createVault();
   const empty = await vault.push({

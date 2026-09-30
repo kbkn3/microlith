@@ -343,9 +343,12 @@ export class VaultDO extends DurableObject<Env> {
       }
 
       if (!input.deleted) {
+        // 同じ本文へ戻した版を古い日時のまま残すと、現行版が purge され競合の base を失う。
         this.sql.exec(
-          `INSERT OR IGNORE INTO versions(path, rev, kind, body, size, mtime, seq, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO versions(path, rev, kind, body, size, mtime, seq, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(path, rev) DO UPDATE SET
+             mtime = excluded.mtime, seq = excluded.seq, created_at = excluded.created_at`,
           input.path,
           rev,
           input.kind,
