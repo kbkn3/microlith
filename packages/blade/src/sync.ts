@@ -215,7 +215,11 @@ export class SyncEngine {
           let mergedRev: string | undefined;
           let mergeApplied = false;
           try {
-            const result = await this.vault.writeAndWaitForIndex(path, mergedBody, localBody);
+            // 本文が変わらない書き込みでは metadataCache が更新を通知せず、index 待ちが必ず時間切れになる。
+            const result =
+              mergedBody === localBody
+                ? { applied: true as const, index: this.vault.indexOf(path) }
+                : await this.vault.writeAndWaitForIndex(path, mergedBody, localBody);
             mergeApplied = result.applied;
             if (result.applied && result.index !== null) {
               const retried = await this.client.pushNote({
@@ -352,7 +356,15 @@ export class SyncEngine {
         return false;
       }
       // ローカルの編集を削除で消さない。push 側に回せば競合コピーとして残る。
-      if (diverged || this.pendingPushes.has(change.path)) {
+      // 保留は pushAll が未編集の path も積むので、snapshot 後の編集かを読み直して確かめる。
+      const editedWhilePulling =
+        this.pendingPushes.has(change.path) &&
+        (await contentHash(
+          change.kind === "note"
+            ? await this.vault.read(change.path)
+            : await this.vault.readBinary(change.path),
+        )) !== this.state.revOf(change.path);
+      if (diverged || editedWhilePulling) {
         if (change.kind !== "note") return false;
         return (await this.push(change.path)) ? true : this.applyChange(change);
       }

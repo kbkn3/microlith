@@ -158,6 +158,20 @@ test("別行の競合を exact-body index と最新 revision で一度だけ再�
   assert.equal(context.engine.isApplying("note.md"), false);
 });
 
+test("マージ結果が手元と同じなら index を待たず現在の index で再試行する", async () => {
+  // 送信済みの本文を古い base で再送した場合、サーバは unchanged ではなく conflict を返す。
+  const context = fixture({ outcome: { body: localBody, baseBody }, missingIndex: true });
+  await context.engine.pushPath("note.md");
+  assert.equal(context.operations.includes("write merged body"), false);
+  const retries = context.requests.slice(1);
+  assert.equal(retries.length, 1);
+  assert.equal(retries[0].baseRev, "remote-revision");
+  assert.equal(retries[0].body, localBody);
+  assert.equal(retries[0].index.marker, "stale-index");
+  assert.deepEqual([...context.files], [["note.md", localBody]]);
+  assert.equal(context.state.revOf("note.md"), "merged-revision");
+});
+
 test("競合待機中の pull を完了後に処理して最新 remote へ収束する", async () => {
   const newerBody = "first\nremote changed again\n";
   const newerRevision = await contentHash(newerBody);
@@ -212,6 +226,23 @@ for (const deleted of [false, true]) {
     assert.ok(context.requests.some(({ body }) => body === editedBody));
   });
 }
+
+test("pull の削除確認中に未編集のノートが保留されても remote の削除を適用する", async () => {
+  let existenceChecks = 0;
+  const context = fixture({
+    outcome: { body: null },
+    duringExists: async ({ path }) => {
+      if (path !== "note.md" || ++existenceChecks !== 2) return;
+      // Sync now の pushAll は未編集のノートも保留する。
+      await context.engine.pushPath(path);
+    },
+  });
+  context.state.setRev("note.md", await contentHash(localBody));
+  await context.engine.pull();
+  assert.deepEqual([...context.files.keys()], []);
+  assert.equal(context.state.revOf("note.md"), null);
+  assert.deepEqual(context.requests, []);
+});
 
 test("pull の本文取得中に保留された削除が拒否されても remote 本文へ収束する", async () => {
   const revision = await contentHash(remoteBody);
