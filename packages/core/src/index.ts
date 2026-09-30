@@ -40,7 +40,7 @@ const secretEquals = (a: string, b: string): boolean => {
   return diff === 0;
 };
 
-const app = new Hono<{ Bindings: Env; Variables: Variables }>();
+export const app = new Hono<{ Bindings: Env; Variables: Variables }>();
 
 app.onError((error, c) => {
   // 例外をそのまま投げると HTML のエラーページが返り、クライアントが JSON を
@@ -234,16 +234,45 @@ app.get("/vault/:vaultId/deleted", requireDevice, async (c) =>
   c.json({ files: await c.get("vault").deletedFiles() }),
 );
 
+app.get("/vault/:vaultId/versions", requireAdmin, async (c) => {
+  const path = c.req.query("path");
+  if (!path) return c.json({ error: "path required" }, 400);
+  return c.json({ versions: await c.get("vault").versions(path) });
+});
+
+app.get("/vault/:vaultId/version", requireAdmin, async (c) => {
+  const path = c.req.query("path");
+  if (!path) return c.json({ error: "path required" }, 400);
+  const rev = c.req.query("rev");
+  if (!rev) return c.json({ error: "rev required" }, 400);
+  const version = await c.get("vault").version(path, rev);
+  return version ? c.json(version) : c.json({ error: "not found" }, 404);
+});
+
 app.post("/vault/:vaultId/restore", requireDevice, requireWrite, async (c) => {
   const path = c.req.query("path");
   if (!path) return c.json({ error: "path required" }, 400);
-  const result = await c.get("vault").restore(path);
+  const rev = c.req.query("rev");
+  if (!rev) {
+    const result = await c.get("vault").restore(path);
+    return result.status === "conflict" ? c.json(result, 409) : c.json(result);
+  }
+  if (c.get("device").id !== "admin") return c.json({ error: "forbidden" }, 403);
+  const vault = c.get("vault");
+  const version = await vault.version(path, rev);
+  if (!version) return c.json({ error: "not found" }, 404);
+  if (version.kind === "asset" && !(await c.env.ASSETS.head(`assets/${rev}`))) {
+    return c.json({ error: "object missing" }, 404);
+  }
+  const result = await vault.restoreVersion(path, rev);
+  if (!result) return c.json({ error: "not found" }, 404);
   return result.status === "conflict" ? c.json(result, 409) : c.json(result);
 });
 
 // --- OAuth の同意画面と `/setup` ------------------------------------------------
 
 app.route("/", authorize);
+app.get("/setup", (c) => c.env.SETUP_UI.fetch(new Request(new URL("/", c.req.url), c.req.raw)));
 app.all("*", (c) => c.env.SETUP_UI.fetch(c.req.raw));
 
 /**

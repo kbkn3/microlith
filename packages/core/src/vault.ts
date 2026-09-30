@@ -1,10 +1,9 @@
 import { DurableObject } from "cloudflare:workers";
 import { ALL_TOOLS } from "@microlith/haft";
-import { SCHEMA } from "./schema";
+import { BACKFILL_VERSIONS_SQL, HISTORY_RETENTION_MS, PURGE_VERSIONS_SQL, SCHEMA } from "./schema";
 import { contentHash, tokenHash } from "./rev";
 import type { Env } from "./env";
 
-const TOMBSTONE_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 const PURGE_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const DEFAULT_CHANGES_LIMIT = 500;
 
@@ -31,7 +30,19 @@ export type PushInput = {
 export type PushResult =
   | { status: "ok"; seq: number; rev: string }
   | { status: "unchanged"; seq: number; rev: string }
-  | { status: "conflict"; rev: string; body: string | null };
+  | { status: "conflict"; rev: string; body: string | null; baseBody?: string };
+
+export type VersionMetadata = {
+  path: string;
+  rev: string;
+  kind: "note" | "asset";
+  size: number;
+  mtime: number;
+  seq: number;
+  created_at: number;
+};
+
+export type VersionRecord = VersionMetadata & { body: string | null };
 
 type FileRow = {
   path: string;
@@ -49,7 +60,44 @@ export class VaultDO extends DurableObject<Env> {
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     // hibernation から復帰するたび constructor が走るため、ここは冪等でなければならない。
-    for (const statement of SCHEMA) ctx.storage.sql.exec(statement);
+    void ctx.blockConcurrencyWhile(async () => {
+      for (const statement of SCHEMA) this.sql.exec(statement);
+      // purge 済みの履歴を tombstone から再生成しない。失敗した移行だけ再試行する。
+      if (this.readMeta("history_backfilled_at")) return;
+      const cutoff = Date.now() - HISTORY_RETENTION_MS;
+      this.sql.exec(BACKFILL_VERSIONS_SQL, cutoff);
+      const deletedNotes = [
+        ...this.sql.exec<{
+          path: string;
+          body: string;
+          mtime: number;
+          seq: number;
+          updated_at: number;
+        }>(
+          `SELECT f.path, n.body, f.mtime, f.seq, f.updated_at FROM files f
+           JOIN notes n ON n.path = f.path
+           WHERE f.deleted = 1 AND f.kind = 'note' AND f.deleted_at >= ? AND f.updated_at >= ?`,
+          cutoff,
+          cutoff,
+        ),
+      ];
+      // tombstone の rev は本文を指さない。添付は元の hash を証明できないため移行しない。
+      for (const note of deletedNotes) {
+        const rev = await contentHash(note.body);
+        this.sql.exec(
+          `INSERT OR IGNORE INTO versions(path, rev, kind, body, size, mtime, seq, created_at)
+           VALUES (?, ?, 'note', ?, ?, ?, ?, ?)`,
+          note.path,
+          rev,
+          note.body,
+          note.body.length,
+          note.mtime,
+          note.seq,
+          note.updated_at,
+        );
+      }
+      this.writeMeta("history_backfilled_at", Date.now());
+    });
     // keepalive を自前で処理すると毎回 DO が起きて hibernation が無意味になる。
     ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair("ping", "pong"));
   }
@@ -187,6 +235,50 @@ export class VaultDO extends DurableObject<Env> {
     return row ?? null;
   }
 
+  async versions(path: string): Promise<VersionMetadata[]> {
+    return [
+      ...this.sql.exec<VersionMetadata>(
+        `SELECT path, rev, kind, size, mtime, seq, created_at FROM versions
+         WHERE path = ? AND created_at >= ? ORDER BY created_at DESC, seq DESC`,
+        path,
+        Date.now() - HISTORY_RETENTION_MS,
+      ),
+    ];
+  }
+
+  async version(path: string, rev: string): Promise<VersionRecord | null> {
+    const [row] = [
+      ...this.sql.exec<VersionRecord>(
+        `SELECT path, rev, kind, body, size, mtime, seq, created_at FROM versions
+         WHERE path = ? AND rev = ? AND created_at >= ?`,
+        path,
+        rev,
+        Date.now() - HISTORY_RETENTION_MS,
+      ),
+    ];
+    return row ?? null;
+  }
+
+  async restoreVersion(path: string, rev: string): Promise<PushResult | null> {
+    const version = await this.version(path, rev);
+    if (
+      !version ||
+      (version.kind === "note" &&
+        (version.body === null || (await contentHash(version.body)) !== version.rev))
+    )
+      return null;
+    const current = await this.head(path);
+    return this.push({
+      path,
+      baseRev: current && current.deleted === 0 ? current.rev : null,
+      kind: version.kind,
+      mtime: Date.now(),
+      body: version.body ?? undefined,
+      rev: version.rev,
+      size: version.size,
+    });
+  }
+
   async push(input: PushInput): Promise<PushResult> {
     const current = await this.head(input.path);
     const currentRev = current && current.deleted === 0 ? current.rev : null;
@@ -195,7 +287,16 @@ export class VaultDO extends DurableObject<Env> {
     const wasIndexed = current !== null && current.deleted === 0;
     if (currentRev !== input.baseRev) {
       const note = current?.kind === "note" ? await this.readNote(input.path) : null;
-      return { status: "conflict", rev: current?.rev ?? "", body: note?.body ?? null };
+      const base =
+        input.kind === "note" && input.baseRev
+          ? await this.version(input.path, input.baseRev)
+          : null;
+      return {
+        status: "conflict",
+        rev: current?.rev ?? "",
+        body: note?.body ?? null,
+        ...(base?.body === null || base?.body === undefined ? {} : { baseBody: base.body }),
+      };
     }
 
     const rev = input.deleted
@@ -209,35 +310,56 @@ export class VaultDO extends DurableObject<Env> {
       return { status: "unchanged", seq: current.seq, rev };
     }
 
-    const seq = this.readMeta("seq") + 1;
     const now = Date.now();
-    this.writeMeta("seq", seq);
+    let seq = 0;
+    this.ctx.storage.transactionSync(() => {
+      seq = this.readMeta("seq") + 1;
+      this.writeMeta("seq", seq);
 
-    this.sql.exec(
-      `INSERT INTO files(path, seq, rev, kind, size, mtime, deleted, deleted_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-       ON CONFLICT(path) DO UPDATE SET
-         seq = excluded.seq, rev = excluded.rev, size = excluded.size, mtime = excluded.mtime,
-         deleted = excluded.deleted, deleted_at = excluded.deleted_at, updated_at = excluded.updated_at`,
-      input.path,
-      seq,
-      rev,
-      input.kind,
-      input.size ?? input.body?.length ?? 0,
-      input.mtime,
-      input.deleted ? 1 : 0,
-      input.deleted ? now : null,
-      now,
-    );
+      this.sql.exec(
+        `INSERT INTO files(path, seq, rev, kind, size, mtime, deleted, deleted_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(path) DO UPDATE SET
+           seq = excluded.seq, rev = excluded.rev, size = excluded.size, mtime = excluded.mtime,
+           deleted = excluded.deleted, deleted_at = excluded.deleted_at, updated_at = excluded.updated_at`,
+        input.path,
+        seq,
+        rev,
+        input.kind,
+        input.size ?? input.body?.length ?? 0,
+        input.mtime,
+        input.deleted ? 1 : 0,
+        input.deleted ? now : null,
+        now,
+      );
 
-    if (input.kind === "note") {
-      if (input.deleted) {
-        // 本文は残す。30日以内なら復元できる(§5.5)。FTS からだけ外す。
-        this.removeFromIndex(input.path, { keepBody: true });
-      } else {
-        this.writeNote(input.path, input.body ?? "", wasIndexed, input.index);
+      if (input.kind === "note") {
+        if (input.deleted) {
+          // 本文は残す。30日以内なら復元できる(§5.5)。FTS からだけ外す。
+          this.removeFromIndex(input.path, { keepBody: true });
+        } else {
+          this.writeNote(input.path, input.body ?? "", wasIndexed, input.index);
+        }
       }
-    }
+
+      if (!input.deleted) {
+        // 同じ本文へ戻した版を古い日時のまま残すと、現行版が purge され競合の base を失う。
+        this.sql.exec(
+          `INSERT INTO versions(path, rev, kind, body, size, mtime, seq, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(path, rev) DO UPDATE SET
+             mtime = excluded.mtime, seq = excluded.seq, created_at = excluded.created_at`,
+          input.path,
+          rev,
+          input.kind,
+          input.kind === "note" ? (input.body ?? "") : null,
+          input.size ?? input.body?.length ?? 0,
+          input.mtime,
+          seq,
+          now,
+        );
+      }
+    });
 
     this.broadcast(seq);
     this.purgeIfDue(now);
@@ -343,7 +465,8 @@ export class VaultDO extends DurableObject<Env> {
   private purgeIfDue(now: number): void {
     if (now - this.readMeta("last_purge_at") < PURGE_INTERVAL_MS) return;
     this.writeMeta("last_purge_at", now);
-    const cutoff = now - TOMBSTONE_RETENTION_MS;
+    const cutoff = now - HISTORY_RETENTION_MS;
+    this.sql.exec(PURGE_VERSIONS_SQL, cutoff);
     const expired = [
       ...this.sql.exec<{ path: string; seq: number }>(
         "SELECT path, seq FROM files WHERE deleted = 1 AND deleted_at < ?",
@@ -386,6 +509,7 @@ export class VaultDO extends DurableObject<Env> {
     // deleteAll はスキーマごと消す。この DO はまだメモリに残っているので、
     // 張り直さないと次のクエリが「テーブルが無い」で落ちる。
     for (const statement of SCHEMA) this.sql.exec(statement);
+    this.writeMeta("history_backfilled_at", Date.now());
     return { files: row.n };
   }
 

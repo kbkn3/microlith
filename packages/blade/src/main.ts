@@ -1,5 +1,6 @@
 import {
   App,
+  type CachedMetadata,
   Notice,
   Plugin,
   PluginSettingTab,
@@ -18,6 +19,7 @@ type Configuration = {
   token: string;
   deviceName: string;
   syncAllFileTypes: boolean;
+  automaticMerge: boolean;
 };
 
 type StoredData = Configuration & { state?: PersistedState };
@@ -28,6 +30,7 @@ const DEFAULT_CONFIGURATION: Configuration = {
   token: "",
   deviceName: "device",
   syncAllFileTypes: false,
+  automaticMerge: true,
 };
 
 /** 再接続の間隔。落ちたサーバに詰め寄らないよう指数的に伸ばす。 */
@@ -102,9 +105,13 @@ export default class MicrolithPlugin extends Plugin {
       this.configuration.token,
       obsidianHttp,
     );
+    const isAutomaticMergeEnabled = () => this.configuration.automaticMerge;
     this.engine = new SyncEngine(client, this.adapter(), state, {
       deviceName: this.configuration.deviceName,
       syncAllFileTypes: this.configuration.syncAllFileTypes,
+      get automaticMerge() {
+        return isAutomaticMergeEnabled();
+      },
       onNotice: (message) => new Notice(`Microlith: ${message}`),
     });
 
@@ -183,6 +190,41 @@ export default class MicrolithPlugin extends Plugin {
       const file = vault.getAbstractFileByPath(path);
       return file instanceof TFile ? file : null;
     };
+    const replaceIfUnchanged = async (
+      path: string,
+      expectedBody: string,
+      body: string,
+    ): Promise<boolean> => {
+      const file = fileAt(path);
+      if (!file) return false;
+      let replaced = false;
+      await vault.process(file, (currentBody) => {
+        replaced = currentBody === expectedBody;
+        return replaced ? body : currentBody;
+      });
+      return replaced;
+    };
+    const toNoteIndex = (path: string, cache: CachedMetadata): NoteIndex => ({
+      links: [
+        ...(cache.links ?? []).map((link) => ({
+          dst: metadataCache.getFirstLinkpathDest(link.link.split("#")[0], path)?.path ?? link.link,
+          kind: "wikilink",
+        })),
+        ...(cache.embeds ?? []).map((embed) => ({
+          dst:
+            metadataCache.getFirstLinkpathDest(embed.link.split("#")[0], path)?.path ?? embed.link,
+          kind: "embed",
+        })),
+      ],
+      tags: (cache.tags ?? []).map((tag) => tag.tag.replace(/^#/, "")),
+      headings: (cache.headings ?? []).map((heading) => ({
+        level: heading.level,
+        text: heading.heading,
+        line: heading.position.start.line,
+        parentLine: 0,
+      })),
+      frontmatter: cache.frontmatter ?? null,
+    });
 
     return {
       list: async () => vault.getFiles().map((file) => file.path),
@@ -196,10 +238,36 @@ export default class MicrolithPlugin extends Plugin {
         if (!file) throw new Error(`missing ${path}`);
         return vault.readBinary(file);
       },
-      write: async (path, body) => {
-        const file = fileAt(path);
-        if (file) await vault.modify(file, body);
-        else await vault.create(path, body);
+      create: async (path, body) => {
+        await vault.create(path, body);
+      },
+      replaceIfUnchanged,
+      writeAndWaitForIndex: async (path, body, expectedBody) => {
+        let finish!: (index: NoteIndex | null) => void;
+        const index = new Promise<NoteIndex | null>((resolve) => {
+          let finished = false;
+          const reference = metadataCache.on("changed", (changedFile, data, cache) => {
+            if (changedFile.path === path && data === body) finish(toNoteIndex(path, cache));
+          });
+          const timeout = window.setTimeout(() => finish(null), 5_000);
+          finish = (result) => {
+            if (finished) return;
+            finished = true;
+            metadataCache.offref(reference);
+            window.clearTimeout(timeout);
+            resolve(result);
+          };
+        });
+        try {
+          if (!(await replaceIfUnchanged(path, expectedBody, body))) {
+            finish(null);
+            return { applied: false };
+          }
+        } catch (error) {
+          finish(null);
+          throw error;
+        }
+        return { applied: true, index: await index };
       },
       writeBinary: async (path, data) => {
         const file = fileAt(path);
@@ -218,33 +286,8 @@ export default class MicrolithPlugin extends Plugin {
         if (!file) return null;
         const cache = metadataCache.getFileCache(file);
         if (!cache) return null;
-        // Obsidian のリンク解決仕様(basename 最短一致・エイリアス・見出し参照)に合わせるには、
-        // ここで解決済みのものを送るしかない。サーバ側で再実装しない(§2-5)。
-        const index: NoteIndex = {
-          links: [
-            ...(cache.links ?? []).map((link) => ({
-              dst:
-                metadataCache.getFirstLinkpathDest(link.link.split("#")[0], path)?.path ??
-                link.link,
-              kind: "wikilink",
-            })),
-            ...(cache.embeds ?? []).map((embed) => ({
-              dst:
-                metadataCache.getFirstLinkpathDest(embed.link.split("#")[0], path)?.path ??
-                embed.link,
-              kind: "embed",
-            })),
-          ],
-          tags: (cache.tags ?? []).map((tag) => tag.tag.replace(/^#/, "")),
-          headings: (cache.headings ?? []).map((heading) => ({
-            level: heading.level,
-            text: heading.heading,
-            line: heading.position.start.line,
-            parentLine: 0,
-          })),
-          frontmatter: cache.frontmatter ?? null,
-        };
-        return index;
+        // Obsidian のリンク解決仕様はサーバ側で再実装せず、解決済み cache を使う(§2-5)。
+        return toNoteIndex(path, cache);
       },
     };
   }
@@ -306,6 +349,15 @@ class MicrolithSettingTab extends PluginSettingTab {
         toggle
           .setValue(configuration.syncAllFileTypes)
           .onChange((value) => void this.plugin.updateConfiguration({ syncAllFileTypes: value })),
+      );
+
+    new Setting(containerEl)
+      .setName("Automatically merge notes")
+      .setDesc("Merge non-overlapping edits. Other conflicts are kept as conflict copies.")
+      .addToggle((toggle) =>
+        toggle
+          .setValue(configuration.automaticMerge)
+          .onChange((value) => void this.plugin.updateConfiguration({ automaticMerge: value })),
       );
 
     new Setting(containerEl).addButton((button) =>

@@ -6,6 +6,11 @@ export const SCHEMA = [
      size INTEGER NOT NULL, mtime INTEGER NOT NULL, deleted INTEGER NOT NULL DEFAULT 0,
      deleted_at INTEGER, updated_at INTEGER NOT NULL)`,
   `CREATE INDEX IF NOT EXISTS files_by_seq ON files(seq)`,
+  `CREATE TABLE IF NOT EXISTS versions(
+     path TEXT NOT NULL, rev TEXT NOT NULL, kind TEXT NOT NULL, body TEXT,
+     size INTEGER NOT NULL, mtime INTEGER NOT NULL, seq INTEGER NOT NULL, created_at INTEGER NOT NULL,
+     PRIMARY KEY(path, rev))`,
+  `CREATE INDEX IF NOT EXISTS versions_by_created_at ON versions(created_at)`,
   `CREATE TABLE IF NOT EXISTS notes(
      id INTEGER PRIMARY KEY, path TEXT UNIQUE NOT NULL, title TEXT, body TEXT NOT NULL,
      frontmatter_json TEXT)`,
@@ -21,3 +26,14 @@ export const SCHEMA = [
      id TEXT PRIMARY KEY, name TEXT NOT NULL, token_hash TEXT NOT NULL, scope TEXT NOT NULL,
      last_seen_seq INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL, revoked_at INTEGER)`,
 ] as const;
+
+export const HISTORY_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
+
+export const BACKFILL_VERSIONS_SQL = `INSERT OR IGNORE INTO versions
+  (path, rev, kind, body, size, mtime, seq, created_at)
+  SELECT f.path, f.rev, f.kind, n.body, f.size, f.mtime, f.seq, f.updated_at
+  FROM files f LEFT JOIN notes n ON n.path = f.path
+  WHERE f.deleted = 0 AND f.updated_at >= ?
+    AND (f.kind = 'asset' OR n.body IS NOT NULL)`;
+
+export const PURGE_VERSIONS_SQL = "DELETE FROM versions WHERE created_at < ?";

@@ -19,7 +19,7 @@ export type NoteIndex = {
 
 export type PushOutcome =
   | { status: "ok" | "unchanged"; seq: number; rev: string }
-  | { status: "conflict"; rev: string; body: string | null };
+  | { status: "conflict"; rev: string; body: string | null; baseBody?: string };
 
 export class ServerError extends Error {
   constructor(

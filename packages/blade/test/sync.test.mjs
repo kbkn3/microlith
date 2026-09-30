@@ -38,6 +38,20 @@ test("同期エンジンを実サーバと突き合わせる", async () => {
       },
       readBinary: async (path) => files.get(path),
       write: async (path, body) => void files.set(path, body),
+      create: async (path, body) => {
+        if (files.has(path)) throw new Error(`${path} already exists`);
+        files.set(path, body);
+      },
+      replaceIfUnchanged: async (path, expectedBody, body) => {
+        if (files.get(path) !== expectedBody) return false;
+        files.set(path, body);
+        return true;
+      },
+      writeAndWaitForIndex: async (path, body, expectedBody) => {
+        if (files.get(path) !== expectedBody) return { applied: false };
+        files.set(path, body);
+        return { applied: true, index: { links: [], tags: [], headings: [] } };
+      },
       writeBinary: async (path, data) => void files.set(path, data),
       remove: async (path) => void files.delete(path),
       exists: async (path) => files.has(path),
@@ -102,7 +116,26 @@ test("同期エンジンを実サーバと突き合わせる", async () => {
     "受信内容の押し返しで seq が進んでいる(往復が止まらない)",
   );
 
-  // --- 競合 ---------------------------------------------------------------------
+  for (const sync of ["push", "pull"]) {
+    const path = `merge-${sync}.md`;
+    await laptop.vault.write(path, "# 共通の見出し\n共通の本文。\n");
+    await laptop.engine.pushPath(path);
+    await phone.engine.pull();
+    await laptop.vault.write(path, "# ラップトップの見出し\n共通の本文。\n");
+    await laptop.engine.pushPath(path);
+    await phone.vault.write(path, "# 共通の見出し\n電話の本文。\n");
+    if (sync === "push") await phone.engine.pushPath(path);
+    else await phone.engine.pull();
+    assert.equal(phone.vault.files.get(path), "# ラップトップの見出し\n電話の本文。\n");
+    assert.equal(
+      [...phone.vault.files.keys()].some((name) => name.startsWith(`merge-${sync} (`)),
+      false,
+    );
+    await laptop.engine.pull();
+    assert.equal(laptop.vault.files.get(path), phone.vault.files.get(path));
+  }
+
+  // --- 同一行の競合 --------------------------------------------------------------
 
   await laptop.vault.write("note.md", "# 細石刃\n\nラップトップの編集。\n");
   await laptop.engine.pushPath("note.md");
@@ -183,6 +216,25 @@ test("同期エンジンを実サーバと突き合わせる", async () => {
   await laptop.engine.pushPath("note.md");
   await phone.engine.pull();
   assert.equal(phone.vault.files.has("note.md"), false, "削除が伝播していない");
+
+  await laptop.vault.write("deleted-conflict.md", "shared body\n");
+  await laptop.engine.pushPath("deleted-conflict.md");
+  await phone.engine.pull();
+  await laptop.vault.remove("deleted-conflict.md");
+  await laptop.engine.pushPath("deleted-conflict.md");
+  await phone.vault.write("deleted-conflict.md", "local edit after remote deletion\n");
+  await phone.engine.pushPath("deleted-conflict.md");
+  await laptop.engine.pull();
+  for (const device of [laptop, phone]) {
+    assert.equal(
+      device.vault.files.get("deleted-conflict.md"),
+      "local edit after remote deletion\n",
+    );
+    const copy = [...device.vault.files.keys()].find((path) =>
+      path.startsWith("deleted-conflict (Conflicted copy"),
+    );
+    assert.equal(device.vault.files.get(copy), "local edit after remote deletion\n");
+  }
 
   // --- 除外 ---------------------------------------------------------------------
 

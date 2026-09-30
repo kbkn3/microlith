@@ -297,11 +297,35 @@
       <tbody id="deleted"></tbody>
     </table>
   </section>
+
+  <section id="history-panel" hidden>
+    <h2>Version history</h2>
+    <div class="fields">
+      <div>
+        <label for="history-path">Path</label>
+        <input id="history-path" />
+      </div>
+      <button id="load-history">Load history</button>
+    </div>
+    <table>
+      <thead>
+        <tr>
+          <th>Saved</th>
+          <th>Size</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody id="history"></tbody>
+    </table>
+    <pre id="history-preview" hidden></pre>
+  </section>
 </main>
 
 <script>
   const $ = (id) => document.getElementById(id);
-  const state = { secret: sessionStorage.getItem("microlith.secret") ?? "", vault: "default" };
+  let state = { secret: sessionStorage.getItem("microlith.secret") ?? "", vault: "default" };
+  let historyRequest = 0;
+  let previewRequest = 0;
 
   const note = (message, kind = "") => {
     const element = $("connection-note");
@@ -309,15 +333,18 @@
     element.className = `note ${kind}`;
   };
 
-  async function api(action, options = {}) {
-    const url = new URL(`/vault/${encodeURIComponent(state.vault)}/${action}`, location.origin);
+  async function api(action, options = {}, connection = state) {
+    const url = new URL(
+      `/vault/${encodeURIComponent(connection.vault)}/${action}`,
+      location.origin,
+    );
     for (const [key, value] of Object.entries(options.query ?? {}))
       url.searchParams.set(key, value);
     const response = await fetch(url, {
       method: options.method ?? "GET",
       // シークレットはヘッダで送る。クエリ文字列に置くとアクセスログに残る。
       headers: {
-        Authorization: `Bearer ${state.secret}`,
+        Authorization: `Bearer ${connection.secret}`,
         ...(options.body ? { "content-type": "application/json" } : {}),
       },
       body: options.body ? JSON.stringify(options.body) : undefined,
@@ -375,7 +402,8 @@
     return cell;
   };
 
-  async function refresh() {
+  async function refresh(connection = state) {
+    if (connection !== state) return;
     // 4つとも独立なので直列にすると往復が積み上がる。DO と KV への往復が実測を支配する。
     const [status, deviceList, grantList, deletedList] = await Promise.all([
       api("status"),
@@ -383,6 +411,7 @@
       apiRoot("grants"),
       api("deleted"),
     ]);
+    if (connection !== state) return;
 
     $("stats").replaceChildren(
       stat("files", String(status.files)),
@@ -410,10 +439,11 @@
         revoke.className = "danger";
         revoke.textContent = "Revoke";
         revoke.onclick = async () => {
+          if (connection !== state) return;
           if (!confirm(`Revoke the token for ${device.name}? That device will stop syncing.`))
             return;
           await api("devices", { method: "DELETE", query: { id: device.id } });
-          await refresh();
+          await refresh(connection);
         };
         actions.append(revoke);
         row.append(actions);
@@ -442,9 +472,10 @@
         revoke.className = "danger";
         revoke.textContent = "Revoke";
         revoke.onclick = async () => {
+          if (connection !== state) return;
           if (!confirm(`Revoke ${grant.clientName}? It will have to authorize again.`)) return;
           await apiRoot("grants", { method: "DELETE", query: { id: grant.id } });
-          await refresh();
+          await refresh(connection);
         };
         actions.append(revoke);
         row.append(actions);
@@ -467,8 +498,9 @@
           restore.className = "secondary";
           restore.textContent = "Restore";
           restore.onclick = async () => {
+            if (connection !== state) return;
             await api("restore", { method: "POST", query: { path: file.path } });
-            await refresh();
+            await refresh(connection);
           };
           actions.append(restore);
         }
@@ -478,25 +510,98 @@
     );
   }
 
+  async function loadHistory(path = $("history-path").value.trim(), connection = state) {
+    if (connection !== state) return;
+    if (!path) return note("Enter a path to load its history.", "error");
+    const request = ++historyRequest;
+    ++previewRequest;
+    $("history-preview").hidden = true;
+    const { versions } = await api("versions", { query: { path } }, connection);
+    if (connection !== state || request !== historyRequest) return;
+    $("history").replaceChildren(
+      ...versions.map((version) => {
+        const row = document.createElement("tr");
+        const saved = document.createElement("td");
+        saved.textContent = new Date(version.created_at).toLocaleString();
+        const size = document.createElement("td");
+        size.textContent = bytes(version.size);
+        const actions = document.createElement("td");
+        if (version.kind === "note") {
+          const preview = document.createElement("button");
+          preview.className = "secondary";
+          preview.textContent = "Preview";
+          preview.onclick = async () => {
+            if (connection !== state || request !== historyRequest) return;
+            const selection = ++previewRequest;
+            $("history-preview").hidden = true;
+            const selected = await api(
+              "version",
+              { query: { path, rev: version.rev } },
+              connection,
+            );
+            if (connection !== state || request !== historyRequest || selection !== previewRequest)
+              return;
+            $("history-preview").textContent = selected.body;
+            $("history-preview").hidden = false;
+          };
+          actions.append(preview);
+        }
+        const restore = document.createElement("button");
+        restore.className = "secondary";
+        restore.textContent = "Restore";
+        restore.onclick = async () => {
+          if (connection !== state) return;
+          if (
+            !window.confirm(
+              `Restore ${path} in vault ${connection.vault} from ${new Date(version.created_at).toLocaleString()}?`,
+            )
+          )
+            return;
+          if (connection !== state) return;
+          await api("restore", { method: "POST", query: { path, rev: version.rev } }, connection);
+          if (connection !== state) return;
+          await refresh(connection);
+          await loadHistory(path, connection);
+          if (connection !== state) return;
+          note(`Restored ${path}.`, "ok");
+        };
+        actions.append(restore);
+        row.append(saved, size, actions);
+        return row;
+      }),
+    );
+  }
+
   $("connect").onclick = async () => {
-    state.secret = $("secret").value.trim();
-    state.vault = $("vault").value.trim() || "default";
+    const connection = {
+      secret: $("secret").value.trim(),
+      vault: $("vault").value.trim() || "default",
+    };
+    state = connection;
+    $("history").replaceChildren();
+    $("history-preview").textContent = "";
+    $("history-preview").hidden = true;
+    $("history-panel").hidden = true;
     try {
       // 一覧が引けなくても本体の操作は続けられるので、refresh と並べて先に投げる
       const vaultList = apiRoot("vaults").catch(() => null);
-      await refresh();
+      await refresh(connection);
       const listed = await vaultList;
+      if (connection !== state) return;
       if (listed) renderKnownVaults(listed.vaults);
       sessionStorage.setItem("microlith.secret", state.secret);
       rememberVault(state.vault);
       $("status-panel").hidden = false;
       $("devices-panel").hidden = false;
+      $("history-panel").hidden = false;
       note(`Connected to ${state.vault}.`, "ok");
     } catch (error) {
+      if (connection !== state) return;
       $("status-panel").hidden = true;
       $("devices-panel").hidden = true;
       $("grants-panel").hidden = true;
       $("deleted-panel").hidden = true;
+      $("history-panel").hidden = true;
       note(
         String(error).includes("401")
           ? "That admin secret was not accepted."
@@ -524,6 +629,8 @@
     $("copy").textContent = "Copied";
     setTimeout(() => ($("copy").textContent = "Copy"), 1500);
   };
+
+  $("load-history").onclick = () => void loadHistory();
 
   renderKnownVaults();
   if (state.secret) $("secret").value = state.secret;

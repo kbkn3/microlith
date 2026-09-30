@@ -1,6 +1,6 @@
 {
   "name": "microlith",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "license": "MIT",
   "workspaces": [
@@ -18,7 +18,7 @@
     "check:static": "npm run secretlint && npm run format:check && npm run lint && npm run typecheck",
     "check": "npm run check:static && npm test",
     "prepare": "git config core.hooksPath .githooks",
-    "test": "npm run test:registry",
+    "test": "vp test packages/core/test/registry.test.mjs packages/core/test/history.test.mjs packages/core/test/setup.test.mjs packages/blade/test/merge.test.mjs packages/blade/test/conflict.test.mjs packages/blade/test/adapter.test.mjs",
     "smoke": "vp test packages/core/test/smoke.test.mjs",
     "build:blade": "npm run build --workspace @microlith/blade",
     "test:blade": "vp test packages/blade/test/sync.test.mjs",
