@@ -25,6 +25,8 @@ export type PushInput = {
   size?: number;
   deleted?: boolean;
   index?: NoteIndex;
+  /** 発信元の deviceId。自分の push を通知で受けて pull し直す往復を省く。 */
+  origin?: string;
 };
 
 export type PushResult =
@@ -361,7 +363,7 @@ export class VaultDO extends DurableObject<Env> {
       }
     });
 
-    this.broadcast(seq);
+    this.broadcast(seq, input.origin);
     this.purgeIfDue(now);
     return { status: "ok", seq, rev };
   }

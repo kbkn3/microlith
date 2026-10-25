@@ -398,14 +398,15 @@ test("同期 API を実サーバと突き合わせる", async () => {
   await settle();
   assert.deepEqual(b.inbox.slice(1), ["pong"], "ping/pong の auto-response が効いていない");
 
-  // push は接続中の全端末に通知が飛ぶ
+  // push は発信元を除く全端末に通知が飛ぶ
   await call("push", {
     token: device,
     method: "POST",
     body: { path: "second.md", baseRev: null, mtime: 30, body: "# 二枚目\n" },
   });
   await settle();
-  const notified = JSON.parse(a.inbox.at(-1));
+  assert.deepEqual(a.inbox, [], "発信元に自分の push の通知が返っている");
+  const notified = JSON.parse(b.inbox.at(-1));
   assert.equal(notified.type, "changed");
   assert.ok(notified.seq > 0, "通知に seq が入っていない");
 

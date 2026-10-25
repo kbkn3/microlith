@@ -204,7 +204,7 @@ app.post("/vault/:vaultId/push", requireDevice, requireWrite, async (c) => {
     deleted?: boolean;
     index?: NoteIndex;
   }>();
-  const result = await c.get("vault").push({ ...input, kind: "note" });
+  const result = await c.get("vault").push({ ...input, kind: "note", origin: c.get("device").id });
   return result.status === "conflict" ? c.json(result, 409) : c.json(result);
 });
 
@@ -226,6 +226,7 @@ app.post("/vault/:vaultId/asset", requireDevice, requireWrite, async (c) => {
     mtime: Number(c.req.query("mtime") ?? Date.now()),
     rev,
     size: bytes.byteLength,
+    origin: c.get("device").id,
   });
   return result.status === "conflict" ? c.json(result, 409) : c.json(result);
 });
