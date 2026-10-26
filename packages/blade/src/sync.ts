@@ -122,6 +122,7 @@ export class SyncEngine {
   private syncing = false;
   private pendingPushes = new Set<string>();
   private pendingPull = false;
+  private stopped = false;
 
   constructor(
     private readonly client: MicrolithClient,
@@ -143,13 +144,22 @@ export class SyncEngine {
     await this.syncPending();
   }
 
+  /** 送り先の変更で捨てる engine。走っている処理は今のバッチで止め、新しい処理は受け付けない。 */
+  stop(): void {
+    this.stopped = true;
+    this.pendingPull = false;
+    this.pendingPushes.clear();
+  }
+
   private enqueuePush(path: string): void {
+    if (this.stopped) return;
     if (isExcluded(path, this.options.syncAllFileTypes)) return;
     if (this.applying.has(path)) return;
     this.pendingPushes.add(path);
   }
 
   async pull(): Promise<number> {
+    if (this.stopped) return 0;
     this.pendingPull = true;
     return this.syncPending();
   }
@@ -353,7 +363,7 @@ export class SyncEngine {
         if (await this.applyChange(change)) applied++;
       });
       this.state.lastSeq = result.seq;
-      if (!result.hasMore) break;
+      if (!result.hasMore || this.stopped) break;
     }
     await this.state.save();
     return applied;
