@@ -21,7 +21,7 @@ export function createVaultMcpHandler(
   options: { canWrite: boolean },
 ) {
   return createMcpHandler(() => {
-    const server = new McpServer({ name: "microlith", version: "0.1.2" });
+    const server = new McpServer({ name: "microlith", version: "0.1.3" });
 
     // 読み取り専用のトークンに書き込みツールを見せない。
     // 呼べないツールを一覧に出すと、モデルが試して失敗するだけ。
