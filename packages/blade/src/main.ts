@@ -68,6 +68,7 @@ export default class MicrolithPlugin extends Plugin {
   private socket: WebSocket | null = null;
   private reconnectDelay = RECONNECT_BASE_MS;
   private stopping = false;
+  private starting = false;
 
   async onload(): Promise<void> {
     const stored = ((await this.loadData()) ?? {}) as Partial<StoredData>;
@@ -95,6 +96,18 @@ export default class MicrolithPlugin extends Plugin {
       new Notice("Microlith: set the server URL and device token in settings.");
       return;
     }
+    // 連打で二重に起動すると、ソケットとイベント登録が重複する。
+    if (this.engine || this.starting) return;
+    this.starting = true;
+    try {
+      await this.initialize();
+    } finally {
+      this.starting = false;
+    }
+    await this.syncNow();
+  }
+
+  private async initialize(): Promise<void> {
     const stored = ((await this.loadData()) ?? {}) as Partial<StoredData>;
     const state = new PluginState(stored.state ?? null, async (next) => {
       await this.saveData({ ...this.configuration, state: next });
@@ -117,7 +130,6 @@ export default class MicrolithPlugin extends Plugin {
 
     this.registerVaultEvents();
     this.connect(client);
-    await this.syncNow();
   }
 
   private registerVaultEvents(): void {
@@ -166,6 +178,8 @@ export default class MicrolithPlugin extends Plugin {
   }
 
   async syncNow(): Promise<void> {
+    // 起動時に未設定だと engine が作られない。設定後の Sync now をそのまま起動の契機にする。
+    if (!this.engine) return this.start();
     await this.pullSafely();
     try {
       await this.engine?.pushAll();
@@ -204,6 +218,14 @@ export default class MicrolithPlugin extends Plugin {
       });
       return replaced;
     };
+    // vault.create は親フォルダを作らない。モバイルでは未作成のフォルダ配下の受信が失敗する。
+    const createParentFolders = async (path: string): Promise<void> => {
+      const segments = path.split("/").slice(0, -1);
+      for (let depth = 1; depth <= segments.length; depth++) {
+        const folder = segments.slice(0, depth).join("/");
+        if (!vault.getAbstractFileByPath(folder)) await vault.createFolder(folder);
+      }
+    };
     const toNoteIndex = (path: string, cache: CachedMetadata): NoteIndex => ({
       links: [
         ...(cache.links ?? []).map((link) => ({
@@ -239,6 +261,7 @@ export default class MicrolithPlugin extends Plugin {
         return vault.readBinary(file);
       },
       create: async (path, body) => {
+        await createParentFolders(path);
         await vault.create(path, body);
       },
       replaceIfUnchanged,
@@ -272,7 +295,10 @@ export default class MicrolithPlugin extends Plugin {
       writeBinary: async (path, data) => {
         const file = fileAt(path);
         if (file) await vault.modifyBinary(file, data);
-        else await vault.createBinary(path, data);
+        else {
+          await createParentFolders(path);
+          await vault.createBinary(path, data);
+        }
       },
       remove: async (path) => {
         const file = fileAt(path);
