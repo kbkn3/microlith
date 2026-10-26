@@ -145,6 +145,10 @@ export default class MicrolithPlugin extends Plugin {
         push(file.path);
       }),
     );
+    // モバイルは裏に回ると通信ごと止まり、その間の通知は届かない。前面に戻ったら取りに行く。
+    this.registerDomEvent(document, "visibilitychange", () => {
+      if (document.visibilityState === "visible") void this.pullSafely();
+    });
   }
 
   private connect(client: MicrolithClient): void {
@@ -153,6 +157,8 @@ export default class MicrolithPlugin extends Plugin {
     this.socket = socket;
     socket.addEventListener("open", () => {
       this.reconnectDelay = RECONNECT_BASE_MS;
+      // 切断中の通知は再送されない。起動直後の pull と重なっても SyncEngine が1回にまとめる。
+      void this.pullSafely();
     });
     socket.addEventListener("close", () => {
       if (this.stopping) return;
