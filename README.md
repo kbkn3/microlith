@@ -112,7 +112,7 @@ Releasing the plugin is a tag push. The tag must equal the version in
 find the release; CI refuses the tag otherwise.
 
 ```bash
-git tag 0.1.1 && git push origin 0.1.1
+git tag 0.1.2 && git push origin 0.1.2
 ```
 
 The sync engine talks to an adapter rather than to Obsidian directly, so `test:blade` drives two
@@ -229,7 +229,7 @@ npm run build:blade    # Obsidian 用の packages/blade/main.js を生成
 一致しない場合は CI がリリースを中止します。
 
 ```bash
-git tag 0.1.1 && git push origin 0.1.1
+git tag 0.1.2 && git push origin 0.1.2
 ```
 
 同期エンジンは Obsidian 本体ではなくアダプターを介して動作します。そのため `test:blade` は
