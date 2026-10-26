@@ -229,7 +229,13 @@ export default class MicrolithPlugin extends Plugin {
       const segments = path.split("/").slice(0, -1);
       for (let depth = 1; depth <= segments.length; depth++) {
         const folder = segments.slice(0, depth).join("/");
-        if (!vault.getAbstractFileByPath(folder)) await vault.createFolder(folder);
+        if (vault.getAbstractFileByPath(folder)) continue;
+        try {
+          await vault.createFolder(folder);
+        } catch (error) {
+          // 同じフォルダ配下を並列に受信すると、作成が競合する。
+          if (!vault.getAbstractFileByPath(folder)) throw error;
+        }
       }
     };
     const toNoteIndex = (path: string, cache: CachedMetadata): NoteIndex => ({
