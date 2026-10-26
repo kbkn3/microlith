@@ -414,7 +414,20 @@ export class SyncEngine {
 
   /** 起動時など、ローカル全体をサーバに合わせる。 */
   async pushAll(): Promise<void> {
-    for (const path of await this.vault.list()) await this.pushPath(path);
+    for (const path of await this.vault.list()) {
+      // rev は内容のハッシュなので、一致すれば送ってもサーバは unchanged を返すだけ。
+      // 起動のたびに全添付を再アップロードしないよう、送る前に手元で比べる。
+      // push() 側で省くと、applyChange が push の成否で分岐している箇所が止まらなくなる。
+      // ponytail: 起動ごとに全ファイルを読んでハッシュする。重ければ mtime と size で先に絞る。
+      const rev = this.state.revOf(path);
+      if (rev && !isExcluded(path, this.options.syncAllFileTypes)) {
+        const content = isNote(path)
+          ? await this.vault.read(path)
+          : await this.vault.readBinary(path);
+        if ((await contentHash(content)) === rev) continue;
+      }
+      await this.pushPath(path);
+    }
     // ローカルから消えたまま削除を送れていない path を拾う
     const present = new Set(await this.vault.list());
     for (const tracked of this.state.paths()) {
