@@ -83,7 +83,11 @@ export default class MicrolithPlugin extends Plugin {
 
     // Vault のイベントは起動時のインデックス構築でも大量に飛ぶ。
     // レイアウトが落ち着いてから購読しないと、起動のたびに全ファイルを push してしまう。
-    this.app.workspace.onLayoutReady(() => void this.start());
+    // 送り先を変えて engine を作り直しても重複しないよう、購読は一度だけにする。
+    this.app.workspace.onLayoutReady(() => {
+      this.registerVaultEvents();
+      void this.start();
+    });
   }
 
   onunload(): void {
@@ -110,6 +114,8 @@ export default class MicrolithPlugin extends Plugin {
   private async initialize(): Promise<void> {
     const stored = ((await this.loadData()) ?? {}) as Partial<StoredData>;
     const state = new PluginState(stored.state ?? null, async (next) => {
+      // 送り先を変えた後に、前の engine の遅れた保存が新しい送り先の状態を上書きしないようにする。
+      if (this.engine !== engine) return;
       await this.saveData({ ...this.configuration, state: next });
     });
     const client = new MicrolithClient(
@@ -119,7 +125,7 @@ export default class MicrolithPlugin extends Plugin {
       obsidianHttp,
     );
     const isAutomaticMergeEnabled = () => this.configuration.automaticMerge;
-    this.engine = new SyncEngine(client, this.adapter(), state, {
+    const engine = new SyncEngine(client, this.adapter(), state, {
       deviceName: this.configuration.deviceName,
       syncAllFileTypes: this.configuration.syncAllFileTypes,
       get automaticMerge() {
@@ -127,9 +133,16 @@ export default class MicrolithPlugin extends Plugin {
       },
       onNotice: (message) => new Notice(`Microlith: ${message}`),
     });
-
-    this.registerVaultEvents();
+    this.engine = engine;
     this.connect(client);
+  }
+
+  private stopSync(): void {
+    this.engine?.stop();
+    this.engine = null;
+    const socket = this.socket;
+    this.socket = null;
+    socket?.close();
   }
 
   private registerVaultEvents(): void {
@@ -161,8 +174,11 @@ export default class MicrolithPlugin extends Plugin {
       void this.pullSafely();
     });
     socket.addEventListener("close", () => {
-      if (this.stopping) return;
-      window.setTimeout(() => this.connect(client), this.reconnectDelay);
+      // 送り先を変えて閉じたソケットは、前の送り先につなぎ直さない。
+      if (this.stopping || this.socket !== socket) return;
+      window.setTimeout(() => {
+        if (this.socket === socket) this.connect(client);
+      }, this.reconnectDelay);
       this.reconnectDelay = Math.min(this.reconnectDelay * 2, RECONNECT_MAX_MS);
     });
   }
@@ -195,9 +211,16 @@ export default class MicrolithPlugin extends Plugin {
   }
 
   async updateConfiguration(patch: Partial<Configuration>): Promise<void> {
-    this.configuration = { ...this.configuration, ...patch };
+    const previous = this.configuration;
+    this.configuration = { ...previous, ...patch };
+    const { endpoint, vaultId, token } = this.configuration;
+    // 前の Vault の rev を持ち越すと、手元の編集を「同期済み」と誤認してリモートで上書きしうる。
+    // token だけの変更は同じ Vault の別端末扱いなので、状態はそのまま使える。
+    const targetChanged = endpoint !== previous.endpoint || vaultId !== previous.vaultId;
+    // 入力の1文字ごとに呼ばれるので、ここでは止めるだけにして、再開は Sync now か再起動に任せる。
+    if (targetChanged || token !== previous.token) this.stopSync();
     const stored = ((await this.loadData()) ?? {}) as Partial<StoredData>;
-    await this.saveData({ ...this.configuration, state: stored.state });
+    await this.saveData({ ...this.configuration, state: targetChanged ? undefined : stored.state });
   }
 
   getConfiguration(): Configuration {
