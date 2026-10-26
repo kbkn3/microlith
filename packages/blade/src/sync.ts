@@ -60,6 +60,29 @@ const EXCLUDED_EXTENSIONS = new Set([
 
 const MAX_ASSET_BYTES = 100 * 1024 * 1024;
 
+/** 1件ごとの時間は往復待ちが大半(サーバ処理は約 40ms、間隔は約 500ms)なので path 単位で重ねる。 */
+const CONCURRENCY = 6;
+
+/** 失敗後は新しく始めず、走っている分を待ってから投げる。途中で戻ると次の同期と重なる。 */
+async function forEachConcurrently<T>(items: T[], work: (item: T) => Promise<void>): Promise<void> {
+  let next = 0;
+  let failed = false;
+  let failure: unknown;
+  const worker = async () => {
+    while (!failed && next < items.length) {
+      const item = items[next++];
+      try {
+        await work(item);
+      } catch (error) {
+        if (!failed) failure = error;
+        failed = true;
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(CONCURRENCY, items.length) }, worker));
+  if (failed) throw failure;
+}
+
 export type SyncOptions = {
   deviceName: string;
   /** 画像等も同期する場合に true。既定は Obsidian Sync に合わせて false。 */
@@ -95,7 +118,7 @@ export function conflictCopyPath(path: string, deviceName: string, at: Date): st
 export class SyncEngine {
   /** リモートを適用している最中の path。自分の書き込みを変更検知が拾って押し返すのを防ぐ。 */
   private applying = new Set<string>();
-  // ponytail: Vault全体を直列化する。並列化が必要ならpath処理とseq順序の制御を分ける。
+  // pull と push の切り替えは直列のまま。並列にするのは互いに独立な path の処理だけ。
   private syncing = false;
   private pendingPushes = new Set<string>();
   private pendingPull = false;
@@ -116,10 +139,14 @@ export class SyncEngine {
   }
 
   async pushPath(path: string): Promise<void> {
+    this.enqueuePush(path);
+    await this.syncPending();
+  }
+
+  private enqueuePush(path: string): void {
     if (isExcluded(path, this.options.syncAllFileTypes)) return;
     if (this.applying.has(path)) return;
     this.pendingPushes.add(path);
-    await this.syncPending();
   }
 
   async pull(): Promise<number> {
@@ -138,10 +165,11 @@ export class SyncEngine {
           this.pendingPull = false;
           applied += await this.pullChanges();
         } else {
-          for (const path of this.pendingPushes) {
+          // 1バッチごとに pendingPull を見直し、受信を後回しにしない。
+          const batch = [...this.pendingPushes].slice(0, CONCURRENCY);
+          await forEachConcurrently(batch, async (path) => {
             await this.push(path);
-            break;
-          }
+          });
         }
       }
       return applied;
@@ -320,7 +348,10 @@ export class SyncEngine {
         this.notice("Server history was pruned; performing a full resync.");
         continue;
       }
-      for (const change of result.changes) applied += (await this.applyChange(change)) ? 1 : 0;
+      // 1ページ内の path は重複しない(files は path ごとに1行)。lastSeq はページ全体の適用後に進める。
+      await forEachConcurrently(result.changes, async (change) => {
+        if (await this.applyChange(change)) applied++;
+      });
       this.state.lastSeq = result.seq;
       if (!result.hasMore) break;
     }
@@ -426,12 +457,13 @@ export class SyncEngine {
           : await this.vault.readBinary(path);
         if ((await contentHash(content)) === rev) continue;
       }
-      await this.pushPath(path);
+      this.enqueuePush(path);
     }
     // ローカルから消えたまま削除を送れていない path を拾う
     const present = new Set(await this.vault.list());
     for (const tracked of this.state.paths()) {
-      if (!present.has(tracked)) await this.pushPath(tracked);
+      if (!present.has(tracked)) this.enqueuePush(tracked);
     }
+    await this.syncPending();
   }
 }

@@ -145,6 +145,10 @@ export default class MicrolithPlugin extends Plugin {
         push(file.path);
       }),
     );
+    // モバイルは裏に回ると通信ごと止まり、その間の通知は届かない。前面に戻ったら取りに行く。
+    this.registerDomEvent(document, "visibilitychange", () => {
+      if (document.visibilityState === "visible") void this.pullSafely();
+    });
   }
 
   private connect(client: MicrolithClient): void {
@@ -153,6 +157,8 @@ export default class MicrolithPlugin extends Plugin {
     this.socket = socket;
     socket.addEventListener("open", () => {
       this.reconnectDelay = RECONNECT_BASE_MS;
+      // 切断中の通知は再送されない。起動直後の pull と重なっても SyncEngine が1回にまとめる。
+      void this.pullSafely();
     });
     socket.addEventListener("close", () => {
       if (this.stopping) return;
@@ -223,7 +229,13 @@ export default class MicrolithPlugin extends Plugin {
       const segments = path.split("/").slice(0, -1);
       for (let depth = 1; depth <= segments.length; depth++) {
         const folder = segments.slice(0, depth).join("/");
-        if (!vault.getAbstractFileByPath(folder)) await vault.createFolder(folder);
+        if (vault.getAbstractFileByPath(folder)) continue;
+        try {
+          await vault.createFolder(folder);
+        } catch (error) {
+          // 同じフォルダ配下を並列に受信すると、作成が競合する。
+          if (!vault.getAbstractFileByPath(folder)) throw error;
+        }
       }
     };
     const toNoteIndex = (path: string, cache: CachedMetadata): NoteIndex => ({
