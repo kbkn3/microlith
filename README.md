@@ -20,8 +20,9 @@ Microlith v0.1 is beta software. The sync API, Obsidian plugin, setup UI, and OA
 remote MCP server are implemented and tested together. Desktop sync and the Claude connector have
 also been verified against a deployed Worker.
 
-Mobile Obsidian support, initial sync of a large vault, and the first public BRAT release still need
-real-world validation.
+Beta releases are published through BRAT. Initial sync of a 5,000-note vault has been measured on
+desktop, and an initial pull to an empty vault has been verified on iOS. Android has not been tested
+yet.
 
 ### Before you deploy
 
@@ -40,6 +41,12 @@ revoke devices and connected apps, and restores files deleted within the last 30
 Tokens come in three scopes: `sync` for the Obsidian plugin, and `mcp-read` / `mcp-write` for
 MCP clients that accept bearer tokens. The server only stores a hash, so a token is shown once and
 cannot be recovered — revoke it and issue a new one instead.
+
+Optionally, put [Cloudflare Access](https://developers.cloudflare.com/workers/configuration/cloudflare-access/)
+in front of the browser-only paths `/setup` and `/authorize` as a self-hosted application. Do not
+protect the whole Worker: the plugin and MCP clients, including claude.ai calling `/token` and
+`/register`, authenticate with tokens and cannot pass an Access login. Access is an extra layer;
+`ADMIN_SECRET` is still required and still guards the admin API.
 
 ### The Obsidian plugin
 
@@ -136,8 +143,8 @@ Microlith v0.1 はベータ版です。同期 API、Obsidian プラグイン、�
 OAuth で保護された Remote MCP サーバーは実装済みで、一連の動作をテストしています。
 デスクトップでの同期と、デプロイ済み Worker に対する Claude コネクタの接続も確認済みです。
 
-Obsidian モバイル版での動作、大規模 Vault の初回同期、最初の BRAT 公開リリースは、
-引き続き実環境での検証が必要です。
+ベータ版は BRAT で公開しています。5,000 ノートの Vault の初回同期をデスクトップで計測し、
+iOS では空の Vault への初回 pull を確認済みです。Android はまだ検証していません。
 
 ### デプロイ前の注意
 
@@ -156,6 +163,13 @@ Obsidian モバイル版での動作、大規模 Vault の初回同期、最初�
 トークンのスコープは3種類です。Obsidian プラグイン用の `sync` と、Bearer トークンを受け付ける
 MCP クライアント用の `mcp-read` / `mcp-write` があります。サーバーが保存するのはハッシュだけなので、
 トークンが表示されるのは発行時の一度だけです。紛失した場合は失効させて再発行してください。
+
+任意で、ブラウザだけが開く `/setup` と `/authorize` を
+[Cloudflare Access](https://developers.cloudflare.com/workers/configuration/cloudflare-access/)
+のセルフホストアプリケーションで保護できます。Worker 全体は保護しないでください。プラグインや
+MCP クライアント（`/token` と `/register` を呼ぶ claude.ai を含む）はトークンで認証するため、
+Access のログインを通れません。Access は追加の防御層です。`ADMIN_SECRET` は引き続き必要で、
+管理 API も `ADMIN_SECRET` が守ります。
 
 ### Obsidian プラグイン
 
