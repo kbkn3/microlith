@@ -6,7 +6,6 @@ import {
   PluginSettingTab,
   Setting,
   TFile,
-  debounce,
   requestUrl,
 } from "obsidian";
 import { MicrolithClient, type HttpClient, type NoteIndex } from "./client";
@@ -146,7 +145,18 @@ export default class MicrolithPlugin extends Plugin {
   }
 
   private registerVaultEvents(): void {
-    const push = debounce((path: string) => void this.pushSafely(path), 800, true);
+    // 待ち合わせは path ごと。1つにまとめると、続けて変わった別のファイルが最後の1件以外送られない。
+    const timers = new Map<string, number>();
+    const push = (path: string) => {
+      window.clearTimeout(timers.get(path));
+      timers.set(
+        path,
+        window.setTimeout(() => {
+          timers.delete(path);
+          void this.pushSafely(path);
+        }, 800),
+      );
+    };
     this.registerEvent(this.app.vault.on("modify", (file) => push(file.path)));
     this.registerEvent(this.app.vault.on("create", (file) => push(file.path)));
     this.registerEvent(this.app.vault.on("delete", (file) => push(file.path)));
@@ -185,6 +195,8 @@ export default class MicrolithPlugin extends Plugin {
 
   private async pushSafely(path: string): Promise<void> {
     try {
+      // 受信で書いたファイルも、適用が終わった後に変更として届く。同期済みの内容なら送り返さない。
+      if (await this.engine?.isSynced(path)) return;
       await this.engine?.pushPath(path);
     } catch (error) {
       new Notice(`Microlith: failed to sync ${path}. ${error}`);
